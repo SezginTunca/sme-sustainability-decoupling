@@ -32,7 +32,10 @@ warnings.filterwarnings('ignore')
 
 # ─── Configuration ──────────────────────────────────────────────────
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RAW_DIR = os.path.join(PROJECT_DIR, "Data", "Raw")
+DATA_DIR = os.path.join(PROJECT_DIR, "Data")
+if not os.path.exists(DATA_DIR) and os.path.exists(os.path.join(os.path.dirname(PROJECT_DIR), "Data")):
+    DATA_DIR = os.path.join(os.path.dirname(PROJECT_DIR), "Data")
+RAW_DIR = os.path.join(DATA_DIR, "Raw")
 
 # 1. Search for SAV file in different potential locations
 SAV_FILE = os.path.join(RAW_DIR, "FL498_2021_ZA7806.sav")
@@ -46,12 +49,12 @@ if not os.path.exists(SAV_FILE):
     SAV_FILE = os.path.join(RAW_DIR, "Data_Flash_Eurobarometer_342_SMEs_resource_efficiency_and_green_markets", "FL498_2021_ZA7806.sav")
 
 # 2. Search for Eurostat TSV file
-EUROSTAT_TSV = os.path.join(PROJECT_DIR, "Data", "Eurostat_Digital_Intensity.tsv")
+EUROSTAT_TSV = os.path.join(DATA_DIR, "Eurostat_Digital_Intensity.tsv")
 if not os.path.exists(EUROSTAT_TSV):
     EUROSTAT_TSV = os.path.join(RAW_DIR, "Eurostat_Digital_Intensity.tsv")
 
-OUTPUT_CSV = os.path.join(PROJECT_DIR, "Data", "Processed", "SME_Analytical_Final.csv")
-OUTPUT_XLSX = os.path.join(PROJECT_DIR, "Data", "Input_Data_Consolidated.xlsx")
+OUTPUT_CSV = os.path.join(DATA_DIR, "Processed", "SME_Analytical_Final.csv")
+OUTPUT_XLSX = os.path.join(DATA_DIR, "Input_Data_Consolidated.xlsx")
 
 # EU-27 country codes (from SPSS metadata, verified)
 EU27_COUNTRY_CODES = {

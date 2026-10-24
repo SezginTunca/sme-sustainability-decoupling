@@ -33,8 +33,11 @@ from patsy import build_design_matrices
 
 # ── Paths ────────────────────────────────────────────────────────────
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_FILE = os.path.join(PROJECT_DIR, "Data", "Processed", "SME_Analytical_Final.csv")
-RESULTS_XLSX = os.path.join(PROJECT_DIR, "Data", "Results_Consolidated.xlsx")
+DATA_DIR = os.path.join(PROJECT_DIR, "Data")
+if not os.path.exists(DATA_DIR) and os.path.exists(os.path.join(os.path.dirname(PROJECT_DIR), "Data")):
+    DATA_DIR = os.path.join(os.path.dirname(PROJECT_DIR), "Data")
+DATA_FILE = os.path.join(DATA_DIR, "Processed", "SME_Analytical_Final.csv")
+RESULTS_XLSX = os.path.join(DATA_DIR, "Results_Consolidated.xlsx")
 
 
 # ═══════════════════════════════════════════════════════════════════
