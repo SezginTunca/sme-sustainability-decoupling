@@ -196,7 +196,7 @@ def run_psm(df):
 def run_decoupling_moderation(df):
     """OLS with cross-level interaction for H4."""
     print("\n\n" + "=" * 70)
-    print("DECOUPLING INDEX MODERATION — Digital Intensity (H4)")
+    print("DECOUPLING INDEX MODERATION - Digital Intensity (H4)")
     print("=" * 70)
 
     needed = ['DI', 'B2B_private', 'B2G_public', 'DII_composite',
@@ -272,13 +272,13 @@ def run_decoupling_moderation(df):
 
 
 # ═══════════════════════════════════════════════════════════════════
-# PART 3: Ordered Probit — Green Premium (H5)
+# PART 3: Ordered Probit - Green Premium (H5)
 # ═══════════════════════════════════════════════════════════════════
 
 def run_green_premium(df):
     """Ordered probit of production cost impact on symbolic vs substantive action."""
     print("\n\n" + "=" * 70)
-    print("ORDERED PROBIT — Green Premium (H5)")
+    print("ORDERED PROBIT - Green Premium (H5)")
     print("=" * 70)
 
     # Q3: 1=sig decreased, 2=slightly decreased, 3=slightly increased,

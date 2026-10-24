@@ -11,8 +11,8 @@ expertise deficits ("Valley of Death" hypothesis).
 Uses econml's CausalForestDML or falls back to manual GRF-style
 estimation if econml is unavailable.
 
-Treatment: Q6.1 (grant_receipt — public funding)
-Outcome:   Q14 (q14_binary — substantive strategy)
+Treatment: Q6.1 (grant_receipt - public funding)
+Outcome:   Q14 (q14_binary - substantive strategy)
 """
 
 import pandas as pd
@@ -291,7 +291,7 @@ def estimate_causal_forest_manual(df):
 
 def main():
     print("=" * 70)
-    print("CAUSAL FOREST / IPW-CATE — Grant Heterogeneity (H3b)")
+    print("CAUSAL FOREST / IPW-CATE - Grant Heterogeneity (H3b)")
     print("=" * 70)
 
     df = pd.read_csv(DATA_FILE)

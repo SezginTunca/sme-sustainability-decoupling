@@ -82,7 +82,7 @@ VARS_TO_EXTRACT = [
     'uniqid', 'country', 'w1_sme', 'w93_sme',
     # Firm characteristics
     'scr10', 'scr12', 'scr12a', 'scr12b', 'scr13', 'scr14', 'nace_b',
-    # Market orientation (scr15) — CORRECT LABELS
+    # Market orientation (scr15) - CORRECT LABELS
     'scr15.1', 'scr15.2', 'scr15.3', 'scr15.4',
     # Domestic/foreign sales
     'scr16',
@@ -97,7 +97,7 @@ VARS_TO_EXTRACT = [
     'q4',
     # Support type
     'q5.1', 'q5.2', 'q5.3', 'q5.4', 'q5.5',
-    # External support details (Q6) — CORRECT LABELS
+    # External support details (Q6) - CORRECT LABELS
     'q6.1', 'q6.2', 'q6.3', 'q6.4', 'q6.5', 'q6.6', 'q6.7',
     # Barriers (Q7)
     'q7.1', 'q7.2', 'q7.3', 'q7.4', 'q7.5', 'q7.6',
@@ -220,14 +220,14 @@ def recode_variables(df):
                 total_repcodes += n_inap
     print(f"  [Routing Fix] Converted {total_repcodes:,} inapplicable (9.0) codes to NaN across {len(inap_vars)} variables.")
 
-    # ── DV 1: Q9 (Symbolic Compliance) — Binary recode ────────────────
+    # ── DV 1: Q9 (Symbolic Compliance) - Binary recode ────────────────
     df['q9_binary'] = np.where(df['q9'] == 1.0, 1, np.where(df['q9'].isin([2.0, 3.0]), 0, np.nan))
     n_sym = df['q9_binary'].sum()
     print(f"  [DV Recode] Q9 (Symbolic - Green Products):")
     print(f"    - Yes (active marketing) -> q9_binary=1 (n={int(n_sym):,})")
     print(f"    - No / Planning -> q9_binary=0")
 
-    # ── DV 2: Q14 (Substantive Compliance) — Binary recode ────────────
+    # ── DV 2: Q14 (Substantive Compliance) - Binary recode ────────────
     df['q14_binary'] = np.where(df['q14'].isin([1.0, 4.0]), 1,
                         np.where(df['q14'].isin([2.0, 3.0]), 0, np.nan))
     n_sub = df['q14_binary'].sum()
@@ -250,13 +250,13 @@ def recode_variables(df):
     print(f"    - DI =  0 (Aligned):                            {di_dist.get(0.0, 0):,} firms")
     print(f"    - DI = +1 (Symbolic Excess / Greenwashing):     {di_dist.get(1.0, 0):,} firms")
 
-    # ── Market Orientation (scr15) — Human-Friendly Semantics ──────────
+    # ── Market Orientation (scr15) - Human-Friendly Semantics ──────────
     df['B2C'] = df['scr15.1']
     df['B2B_private'] = df['scr15.2']
     df['B2G_public'] = df['scr15.3']
     print("  [Semantic Rename] Market channels renamed: scr15.1→B2C, scr15.2→B2B_private, scr15.3→B2G_public")
 
-    # ── External Support Channels (Q6) — Human-Friendly Semantics ───────
+    # ── External Support Channels (Q6) - Human-Friendly Semantics ───────
     # Fill bypassed survey paths with 0 (since they didn't receive the support)
     for q6_var in ['q6.1', 'q6.2', 'q6.3', 'q6.4', 'q6.5', 'q6.6', 'q6.7']:
         if q6_var in df.columns:
@@ -528,7 +528,7 @@ def save_outputs(df):
 
 def main():
     print("╔" + "═" * 68 + "╗")
-    print("║  SME Institutional Decoupling — Master Data Pipeline             ║")
+    print("║  SME Institutional Decoupling - Master Data Pipeline             ║")
     print("║  Corrected: 16 April 2026 (6 critical bug fixes applied)        ║")
     print("╚" + "═" * 68 + "╝\n")
 

@@ -137,8 +137,8 @@ def run_bivariate_probit_approx(X, y1, y2, var_names, sep_results):
     Why this matters (Econometric Rationale):
       1. Joint Estimation & Selection Bias: Symbolic (green products) and substantive 
          (net-zero strategy) choices are not independent decisions. They are chosen 
-         jointly by the firm. Unobserved firm characteristics—such as proactive managerial 
-         green culture, owner ideology, or forward-looking risk management—likely affect 
+         jointly by the firm. Unobserved firm characteristics-such as proactive managerial 
+         green culture, owner ideology, or forward-looking risk management-likely affect 
          both decisions. Estimating separate probits ignores this, creating joint selection 
          bias. Bivariate probit models them jointly.
       2. Residual Error Correlation (rho): Represents the correlation between the 
@@ -265,7 +265,7 @@ def compute_odds_ratios(sep_results, var_names):
 
 def main():
     print("=" * 70)
-    print("BIVARIATE PROBIT — Institutional Decoupling (H1a/b, H2a/b)")
+    print("BIVARIATE PROBIT - Institutional Decoupling (H1a/b, H2a/b)")
     print("=" * 70)
 
     # Load data
@@ -358,12 +358,12 @@ def main():
     print(f"    shared between symbolic green marketing and substantive net-zero decisions.")
     print(f"    This statistically confirms that separate estimation is biased and bivariate probit is required.")
 
-    # Hypothesis 1: Supply Chain Decoupling
+    # Hypothesis 1: Market-Channel Orientation & Decoupling
     b2b_idx = var_names.index('B2B_private')
     b2g_idx = var_names.index('B2G_public')
     b2c_idx = var_names.index('B2C')
 
-    print(f"\n  [Hypothesis 1: Supply-Chain Pressures & Decoupling]")
+    print(f"\n  [Hypothesis 1: Market-Channel Orientation & Decoupling]")
     
     for channel, name, idx in [('B2B_private', 'Private B2B Supply Chains', b2b_idx),
                                ('B2G_public', 'Public Procurement (B2G)', b2g_idx),
