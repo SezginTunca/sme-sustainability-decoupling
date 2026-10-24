@@ -1,4 +1,4 @@
-# Replication Codebase: Customer-Channel Pressures and Sustainability Decoupling
+# Replication Codebase: Market-Channel Orientation, Capability Constraints, and Sustainability Decoupling
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23619995.svg)](https://doi.org/10.5281/zenodo.23619995)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -6,7 +6,7 @@
 
 This repository provides the complete, self-contained empirical replication codebase for the study:
 
-**"Customer-Channel Pressures and Sustainability Decoupling: Evidence from European Small and Medium-Sized Enterprises"**  
+**"Market-Channel Orientation, Capability Constraints, and Sustainability Decoupling: Evidence from European Small and Medium-Sized Enterprises"**  
 **Target Journal:** *Business Strategy and the Environment* (Wiley)  
 **Authors:** Sezgin Tunca, Mausam Budhathoki, and Hari Gopal Risal  
 
@@ -123,7 +123,7 @@ When citing this research or utilizing these scripts, please cite:
 
 ```bibtex
 @article{tunca2026customer,
-  title={Customer-Channel Pressures and Sustainability Decoupling: Evidence from European Small and Medium-Sized Enterprises},
+  title={Market-Channel Orientation, Capability Constraints, and Sustainability Decoupling: Evidence from European Small and Medium-Sized Enterprises},
   author={Tunca, Sezgin and Budhathoki, Mausam and Risal, Hari Gopal},
   journal={Business Strategy and the Environment},
   year={2026},

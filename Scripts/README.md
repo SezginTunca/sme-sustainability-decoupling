@@ -2,7 +2,7 @@
 
 This directory contains the essential data processing, econometric modeling, and empirical analysis scripts for the study:
 
-**"Customer-Channel Pressures and Sustainability Decoupling: Evidence from European Small and Medium-Sized Enterprises"**  
+**"Market-Channel Orientation, Capability Constraints, and Sustainability Decoupling: Evidence from European Small and Medium-Sized Enterprises"**  
 **Target Journal:** *Business Strategy and the Environment* (Wiley)  
 **Authors:** Sezgin Tunca, Mausam Budhathoki, and Hari Gopal Risal  
 
