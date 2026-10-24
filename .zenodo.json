@@ -1,0 +1,33 @@
+{
+  "title": "Replication Codebase: Customer-Channel Pressures and Sustainability Decoupling: Evidence from European Small and Medium-Sized Enterprises",
+  "description": "<p>Replication codebase, econometric models, and estimation routines for the empirical study: <strong>\"Customer-Channel Pressures and Sustainability Decoupling: Evidence from European Small and Medium-Sized Enterprises\"</strong>, published in <em>Business Strategy and the Environment</em> (Wiley).</p><p>This package contains the complete set of Python scripts to clean and harmonize microdata, estimate joint Bivariate Probit models with disturbance error correlation (&rho;), execute Inverse Propensity Score Weighting (IPW-CATE) models testing treatment effect heterogeneity and the 'Valley of Death', perform 1:1 Nearest-Neighbor Propensity Score Matching (PSM) with Rosenbaum sensitivity bounds, estimate Ordered Probit operating cost impacts, and run comprehensive econometric robustness checks (including survey-weighted probits and delta-method probability-scale second differences).</p><p><strong>Data Access:</strong> Microdata is sourced from Flash Eurobarometer 498 (ZA7806, GESIS Data Archive, DOI: 10.4232/1.13941) and Eurostat Digital Intensity Index indicators (isoc_e_dii). Raw data files are publicly accessible and can be placed in <code>Data/Raw/</code> as described in the README.</p>",
+  "upload_type": "software",
+  "creators": [
+    {
+      "name": "Tunca, Sezgin",
+      "orcid": "0000-0001-6840-1466"
+    },
+    {
+      "name": "Budhathoki, Mausam"
+    },
+    {
+      "name": "Risal, Hari Gopal"
+    }
+  ],
+  "access_right": "open",
+  "license": "MIT",
+  "keywords": [
+    "sustainability decoupling",
+    "small and medium-sized enterprises",
+    "customer channels",
+    "bivariate probit",
+    "causal forest",
+    "propensity score matching",
+    "environmental policy",
+    "resource efficiency",
+    "green products",
+    "net-zero strategy",
+    "econometrics",
+    "Business Strategy and the Environment"
+  ]
+}
