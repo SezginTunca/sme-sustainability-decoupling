@@ -38,11 +38,15 @@ This repository contains the full econometric estimation pipeline and data proce
 
 To run the data processing pipeline from scratch:
 
-1. **Flash Eurobarometer 498 (`ZA7806`):**
+1. **Flash Eurobarometer 498 (`ZA7806`) [Analyzed Wave]:**
    - **Source:** GESIS Data Archive for the Social Sciences
    - **Study:** *Flash Eurobarometer 498: SMEs, resource efficiency and green markets, wave 5*
-   - **DOI:** [10.4232/1.13941](https://doi.org/10.4232/1.13941)
+   - **GESIS Study ID:** ZA7806
+   - **GESIS URL:** [https://search.gesis.org/research_data/ZA7806](https://search.gesis.org/research_data/ZA7806)
+   - **DOI:** [10.4232/1.13934](https://doi.org/10.4232/1.13934)
+   - **Dataset Version:** 1.0.0 (2022)
    - **Action:** Download the primary SPSS file `FL498_2021_ZA7806.sav` (or `ZA7806_v1-0-0.sav`) and place it in `Data/Raw/`.
+   - **Note on Subsequent Wave (Wave 6):** The subsequent 2024 wave of this survey series is *Flash Eurobarometer 549* (GESIS Study ID: `ZA8869`, DOI: [10.4232/1.14493](https://doi.org/10.4232/1.14493), URL: [https://search.gesis.org/research_data/ZA8869](https://search.gesis.org/research_data/ZA8869)). The empirical analyses, sample filtering ($N = 17,662 \to 13,322$), and econometric models in this replication repository specifically draw on Wave 5 (`ZA7806`).
 
 2. **Eurostat Digital Intensity Index (DESI):**
    - **Source:** European Commission / Eurostat Database
