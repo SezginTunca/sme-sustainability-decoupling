@@ -58,7 +58,7 @@ def run_psm(df):
     print("PHASE 1: Propensity Score Matching (PSM) for Hypothesis 3a")
     print("=" * 70)
 
-    needed = ['q14_binary', 'q9_binary', 'grant_receipt',
+    needed = ['country_iso2', 'nace_b', 'q14_binary', 'q9_binary', 'grant_receipt',
               'B2B_private', 'B2G_public', 'B2C',
               'barrier_admin', 'barrier_expertise',
               'scr10', 'scr14', 're_action_count']
@@ -71,7 +71,10 @@ def run_psm(df):
 
     X_cols = ['B2B_private', 'B2G_public', 'B2C', 'barrier_admin',
               'barrier_expertise', 'scr10', 'scr14', 're_action_count']
-    X = df_model[X_cols].values
+    X_cov = df_model[X_cols].values
+    FE = pd.concat([pd.get_dummies(df_model['country_iso2'], prefix='c', drop_first=True, dtype=float),
+                    pd.get_dummies(df_model['nace_b'].astype(int), prefix='s', drop_first=True, dtype=float)], axis=1)
+    X = np.column_stack([X_cov.astype(float), FE.values])  # propensity model incl. country + sector FE
 
     # Step 1: Estimate baseline propensity scores via Maximum Likelihood Logit
     def logistic_negll(beta, X_mat, T_vec):
@@ -90,8 +93,12 @@ def run_psm(df):
     # Step 2: Nearest-neighbor matching (1:1 without replacement) within caliper
     treated_idx = np.where(T == 1)[0]
     control_idx = np.where(T == 0)[0]
-    ps_treated = ps[treated_idx]
-    ps_control = ps[control_idx]
+    # Matching and caliper are both on the LOGIT (log-odds) scale (Austin 2011):
+    # caliper = 0.2 * SD(logit PS), computed once over the full estimation sample.
+    log_odds = np.log(ps / (1 - ps))
+    caliper = 0.2 * np.std(log_odds)
+    ps_treated = log_odds[treated_idx]
+    ps_control = log_odds[control_idx]
 
     matched_pairs = []
     used_controls = set()
@@ -101,9 +108,6 @@ def run_psm(df):
         sorted_controls = np.argsort(distances)
         for j in sorted_controls:
             if j not in used_controls:
-                # 0.2 SD of log-odds caliper
-                log_odds = np.log(ps / (1 - ps))
-                caliper = 0.2 * np.std(log_odds)
                 if distances[j] <= caliper:
                     matched_pairs.append((treated_idx[i], control_idx[j]))
                     used_controls.add(j)

@@ -65,7 +65,10 @@ def estimate_causal_forest_manual(df):
     # Baseline covariates to control for selection bias
     X_cols = ['B2B_private', 'B2G_public', 'B2C', 'barrier_admin',
               'barrier_expertise', 'scr10', 'scr14', 're_action_count']
-    X = df[X_cols].values
+    # country (26) and sector fixed effects in the propensity model
+    FE = pd.concat([pd.get_dummies(df['country_iso2'], prefix='c', drop_first=True, dtype=float),
+                    pd.get_dummies(df['nace_b'].astype(int), prefix='s', drop_first=True, dtype=float)], axis=1)
+    X = np.column_stack([df[X_cols].values.astype(float), FE.values])
 
     # ── Step 1: Propensity Score Estimation via MLE Logistic Regression ──
     # We model selection into public support using a logit specification.
@@ -298,7 +301,7 @@ def main():
     print(f"\n  Loaded: {len(df):,} observations")
 
     # Model variables
-    needed = ['q14_binary', 'grant_receipt', 'B2B_private', 'B2G_public', 'B2C',
+    needed = ['country_iso2', 'nace_b', 'q14_binary', 'grant_receipt', 'B2B_private', 'B2G_public', 'B2C',
               'barrier_admin', 'barrier_expertise', 'scr10', 'scr14',
               're_action_count', 'DII_composite']
 
