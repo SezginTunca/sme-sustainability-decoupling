@@ -23,12 +23,13 @@ This repository contains the full econometric estimation pipeline and data proce
 ├── .gitignore                           # Excludes all datasets and bytecode
 ├── .zenodo.json                         # Zenodo open-science metadata
 │
-└── Scripts/                             # Essential replication pipeline (01–05)
+└── Scripts/                             # Essential replication pipeline (01–06)
     ├── 01_build_analytical_sample.py    # Master data ingestion, filtering, and DESI merge
     ├── 02_bivariate_probit.py           # Joint full-ML bivariate probit, FE, clustered SEs, AMEs (Table 2)
     ├── 03_causal_forest.py              # IPW-CATE models for public-financial-support heterogeneity (Section 4.4, Fig. 4)
     ├── 04_psm_and_remaining.py          # 1:1 PSM, Rosenbaum bounds, OLS moderation, Ordered Probits (Tables 3–4)
     ├── 05_robustness.py                 # Clustered robustness checks & probability-scale moderation (Appendix L)
+    ├── 06_verify_all_results.py         # Automated verification suite (31 end-to-end econometric tests)
     └── README.md                        # Script-by-script technical documentation
 ```
 
@@ -102,6 +103,9 @@ python3 Scripts/04_psm_and_remaining.py
 
 # Step 5: Run clustered robustness checks (no RECount, survey weights, routed-only, strict Q14, sector subsamples) and probability-scale moderation
 python3 Scripts/05_robustness.py
+
+# Step 6: Execute automated econometric verification suite (31 end-to-end checks)
+python3 Scripts/06_verify_all_results.py
 ```
 
 *Total execution time: about 4 minutes on a standard laptop (step 2 dominates). Manuscript figures are built separately and are not part of this pipeline.*
@@ -114,9 +118,10 @@ python3 Scripts/05_robustness.py
 | :--- | :--- | :--- | :--- |
 | `01_build_analytical_sample.py` | Data Harmonization | EU-27 SME sample filtering ($N = 13,322 \times 92$ variables) | **Table 1**; Section 3.1 |
 | `02_bivariate_probit.py` | Joint Maximum Likelihood | Bivariate probit with 26 country + sector FE and RECount; country-clustered SEs (27 clusters); disturbance correlation ($\rho = 0.257$); true average marginal effects; cross-equation Wald tests on the joint covariance; Holm adjustment | **Table 2** (H1a, H1b, H2a, H2b, H3a) |
-| `03_causal_forest.py` | Propensity Score / IPW | Stabilized IPW with country + sector FE in the propensity model ($ATE = 0.045$, bootstrap SE 0.016); CATE heterogeneity across barriers, size and digital intensity | **Figure 4**; Section 4.4; Appendix F |
-| `04_psm_and_remaining.py` | Matching & Discrete Choice | 1:1 PSM with a 0.2 SD logit-scale caliper and FE in the propensity model ($ATT = 0.051$, $p = 0.005$); Rosenbaum bounds ($\Gamma^* \approx 1.10$); asymmetry-index OLS moderation; ordered probit costs | **Tables 3–4**; Appendices D, E, H, I |
+| `03_causal_forest.py` | Propensity Score / IPW | Stabilized IPW with country + sector FE in the propensity model ($ATE = 0.045$, bootstrap SE 0.015, cluster SE 0.020); CATE heterogeneity across barriers, size and digital intensity | **Figure 4**; Section 4.4; Appendix F |
+| `04_psm_and_remaining.py` | Matching & Discrete Choice | 1:1 PSM with a 0.2 SD logit-scale caliper and FE in the propensity model ($ATT = 0.050$, $p = 0.006$ on $Y_2$; $ATT = 0.047$, $p = 0.015$ on $Y_1$); Rosenbaum bounds ($\Gamma^* \approx 1.10$); asymmetry-index OLS moderation; ordered probit costs | **Tables 3–4**; Appendices D, E, H, I |
 | `05_robustness.py` | Sensitivity & Moderation | Clustered probits without RECount, survey-weighted, routed-only, strict $Y_2$, sector-stratified; cluster-robust delta-method second difference ($\Delta\text{AME} = +0.073$, $p = 0.001$) | **Appendix L** |
+| `06_verify_all_results.py` | Automated Verification | 31 end-to-end tests validating FIML convergence, survey routing, sample sizes, and parameter bounds | **Quality Assurance** (`31 PASSED`) |
 
 ---
 

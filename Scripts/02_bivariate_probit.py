@@ -86,9 +86,22 @@ def main():
     th0 = np.concatenate([s1.params, s2.params, [0.0]])
     f = lambda t: -obs_ll(t, X, y1, y2).sum()
     gr = lambda t: -scores(t, X, y1, y2).sum(0)
-    res = minimize(f, th0, jac=gr, method='BFGS', options={'maxiter': 300, 'gtol': 1e-4})
+    res = minimize(f, th0, jac=gr, method='BFGS', options={'maxiter': 400, 'gtol': 1e-7})
     th = res.x
     print(f"converged={res.success}, ll={-res.fun:.2f}, rho={np.tanh(th[-1]):.4f}, |grad|max={np.abs(gr(th)).max():.2e}")
+
+    # 24-pt vs 48-pt Gauss-Legendre quadrature accuracy check
+    gl48_x, gl48_w = np.polynomial.legendre.leggauss(48)
+    b1_hat, b2_hat, rho_hat = th[:k], th[k:2 * k], np.tanh(th[2 * k])
+    q1_v, q2_v = 2 * y1 - 1, 2 * y2 - 1
+    h_v, k_v, r_v = q1_v * (X @ b1_hat), q2_v * (X @ b2_hat), q1_v * q2_v * rho_hat * np.ones(len(y1))
+    p24 = bvn_cdf(h_v, k_v, r_v)
+    r48 = 0.5 * r_v[:, None] * (gl48_x[None, :] + 1.0)
+    w48 = 0.5 * r_v[:, None] * gl48_w[None, :]
+    one48 = 1.0 - r48 ** 2
+    dens48 = np.exp(-(h_v[:, None] ** 2 - 2 * r48 * h_v[:, None] * k_v[:, None] + k_v[:, None] ** 2) / (2 * one48)) / (2 * np.pi * np.sqrt(one48))
+    p48 = stats.norm.cdf(h_v) * stats.norm.cdf(k_v) + (w48 * dens48).sum(1)
+    quad_diff_max = float(np.max(np.abs(np.log(np.clip(p24, 1e-300, None)) - np.log(np.clip(p48, 1e-300, None)))))
 
     # Hessian by finite-diff of the summed score; cluster sandwich
     n_par = len(th); H = np.empty((n_par, n_par)); h = 1e-4
@@ -97,7 +110,7 @@ def main():
         H[:, j] = (-scores(th + e, X, y1, y2).sum(0) + scores(th - e, X, y1, y2).sum(0)) / (2 * h) * -1
     H = -(0.5 * (H + H.T))  # observed information = -d2 ll
     ev = np.linalg.eigvalsh(H)
-    print(f"Hessian min eigenvalue = {ev.min():.3f} ({'PD' if ev.min() > 0 else 'NOT PD'})")
+    print(f"Hessian min eigenvalue = {ev.min():.3f}, max eigenvalue = {ev.max():.1f}, cond = {ev.max()/ev.min():.1f} ({'PD' if ev.min() > 0 else 'NOT PD'})")
     Hi = np.linalg.inv(H)
     S = scores(th, X, y1, y2)
     cl = d['country_iso2'].values
@@ -108,12 +121,18 @@ def main():
     V_rob = Hi @ (S.T @ S) @ Hi
     se = np.sqrt(np.diag(V))
 
+    df_c = G_c - 1  # finite-cluster degrees of freedom (df = 27 - 1 = 26)
     rows = []
     for eq, off in [('Y1_Q9_green_offerings', 0), ('Y2_Q14_netzero_strategy', k)]:
         for v in IV + CTRL:
             j = names.index(v) + off
-            rows.append(dict(eq=eq, var=v, beta=th[j], se_cluster=se[j], se_robust=np.sqrt(V_rob[j, j]),
-                             p_cluster=2 * (1 - stats.norm.cdf(abs(th[j] / se[j])))))
+            t_stat = th[j] / se[j]
+            rows.append(dict(
+                eq=eq, var=v, beta=th[j], se_cluster=se[j], se_robust=np.sqrt(V_rob[j, j]),
+                z_cluster=t_stat,
+                p_cluster=2 * (1 - stats.norm.cdf(abs(t_stat))),
+                p_t26=2 * (1 - stats.t.cdf(abs(t_stat), df=df_c))
+            ))
     coef = pd.DataFrame(rows)
 
     # beta cross-equation Wald (joint covariance)
@@ -122,7 +141,13 @@ def main():
         j = names.index(v)
         d_b = th[j] - th[k + j]
         var = V[j, j] + V[k + j, k + j] - 2 * V[j, k + j]
-        tests.append(dict(var=v, test='beta_diff', diff=d_b, se=np.sqrt(var), p=2 * (1 - stats.norm.cdf(abs(d_b) / np.sqrt(var)))))
+        se_d = np.sqrt(var)
+        z_d = d_b / se_d
+        tests.append(dict(
+            var=v, test='beta_diff', diff=d_b, se=se_d, z=z_d,
+            p=2 * (1 - stats.norm.cdf(abs(z_d))),
+            p_t26=2 * (1 - stats.t.cdf(abs(z_d), df=df_c))
+        ))
 
     # true AMEs, delta method (numerical Jacobian)
     a0 = ames(th, X, names, IV)
@@ -137,24 +162,45 @@ def main():
         i1, i2 = 2 * i, 2 * i + 1
         dd = a0[i, 0] - a0[i, 1]
         vd = Vam[i1, i1] + Vam[i2, i2] - 2 * Vam[i1, i2]
-        am_rows.append(dict(var=v, AME_Q9=a0[i, 0], se_Q9=np.sqrt(Vam[i1, i1]), AME_Q14=a0[i, 1], se_Q14=np.sqrt(Vam[i2, i2]),
-                            AME_diff=dd, p_AME_diff=2 * (1 - stats.norm.cdf(abs(dd) / np.sqrt(vd)))))
+        se_dd = np.sqrt(vd)
+        z_dd = dd / se_dd
+        am_rows.append(dict(
+            var=v, AME_Q9=a0[i, 0], se_Q9=np.sqrt(Vam[i1, i1]),
+            AME_Q14=a0[i, 1], se_Q14=np.sqrt(Vam[i2, i2]),
+            AME_diff=dd, se_AME_diff=se_dd,
+            p_AME_diff=2 * (1 - stats.norm.cdf(abs(z_dd))),
+            p_AME_diff_t26=2 * (1 - stats.t.cdf(abs(z_dd), df=df_c))
+        ))
         tests[i]['p_AME_diff'] = am_rows[-1]['p_AME_diff']
+        tests[i]['p_AME_diff_t26'] = am_rows[-1]['p_AME_diff_t26']
     tdf = pd.DataFrame(tests)
-    # Holm adjustment over the beta-difference family
-    p = tdf['p'].values; order = np.argsort(p); m = len(p); adj = np.empty(m); run = 0
-    for r, idx in enumerate(order):
-        run = max(run, (m - r) * p[idx]); adj[idx] = min(1, run)
-    tdf['p_holm'] = adj
+
+    # Holm adjustment over the beta-difference family (both normal and t_26)
+    for col_in, col_out in [('p', 'p_holm'), ('p_t26', 'p_t26_holm')]:
+        p = tdf[col_in].values; order = np.argsort(p); m = len(p); adj = np.empty(m); run = 0
+        for r, idx in enumerate(order):
+            run = max(run, (m - r) * p[idx]); adj[idx] = min(1, run)
+        tdf[col_out] = adj
+
     # rho Wald (LR-free): delta on tanh
     rho = np.tanh(th[-1]); se_rho = (1 - rho ** 2) * np.sqrt(V[-1, -1])
-    print(f"rho = {rho:.4f} (cluster SE {se_rho:.4f}); clusters = {G_c}")
+    grad_max = float(np.abs(gr(th)).max())
+    cond_H = float(ev.max() / ev.min()) if ev.min() > 0 else np.nan
+    print(f"rho = {rho:.4f} (cluster SE {se_rho:.4f}); clusters = {G_c} (df = {df_c})")
     am = pd.DataFrame(am_rows)
     print(coef.round(4).to_string()); print(tdf.round(4).to_string()); print(am.round(4).to_string())
+    coef.to_csv(OUT, index=False)
     with pd.ExcelWriter(OUT.replace('.csv', '.xlsx')) as w:
-        coef.to_excel(w, 'coef', index=False); tdf.to_excel(w, 'cross_eq_tests', index=False); am.to_excel(w, 'AME', index=False)
-        pd.DataFrame([dict(N=len(d), clusters=G_c, rho=rho, se_rho=se_rho, ll=-res.fun, converged=res.success,
-                           hess_min_eig=ev.min())]).to_excel(w, 'diagnostics', index=False)
+        coef.to_excel(w, sheet_name='coef', index=False)
+        tdf.to_excel(w, sheet_name='cross_eq_tests', index=False)
+        am.to_excel(w, sheet_name='AME', index=False)
+        pd.DataFrame([dict(
+            N=len(d), k_per_eq=k, total_params=n_par, clusters=G_c, df_cluster=df_c,
+            rho=rho, se_rho=se_rho, z_rho=rho / se_rho,
+            ll=-res.fun, converged=res.success, grad_inf_norm=grad_max,
+            hess_min_eig=float(ev.min()), hess_max_eig=float(ev.max()), hess_cond_num=cond_H,
+            quad_diff_24_vs_48=quad_diff_max
+        )]).to_excel(w, sheet_name='diagnostics', index=False)
 
 
 if __name__ == '__main__':

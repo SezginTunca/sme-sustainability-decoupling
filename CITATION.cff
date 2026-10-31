@@ -1,8 +1,8 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 title: "Replication Codebase: Market-Channel Orientation and Capability Constraints Shape Cross-Domain Sustainability Asymmetry in European Small and Medium-Sized Enterprises"
-version: 2.0.0
-date-released: 2026-10-29
+version: 2.1.0
+date-released: 2026-10-31
 license: MIT
 authors:
   - family-names: Tunca

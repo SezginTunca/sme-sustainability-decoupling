@@ -1,6 +1,6 @@
 {
   "title": "Replication Codebase: Market-Channel Orientation and Capability Constraints Shape Cross-Domain Sustainability Asymmetry in European Small and Medium-Sized Enterprises",
-  "description": "<p>Replication codebase for the empirical study <strong>\"Market-Channel Orientation and Capability Constraints Shape Cross-Domain Sustainability Asymmetry in European Small and Medium-Sized Enterprises\"</strong> (submitted to <em>Business Strategy and the Environment</em>, Wiley).</p><p>Version 2.0.0 corrects and extends the analysis: a full-information joint bivariate probit with country and sector fixed effects, RECount and country-clustered standard errors (true average marginal effects, joint-covariance cross-equation tests, Holm adjustment); inverse-propensity weighting and 1:1 propensity-score matching with fixed effects in the propensity model and a logit-scale caliper (Rosenbaum bounds); and clustered robustness checks (no RECount, survey weights, routed-only, strict Q14, sector-stratified) with probability-scale moderation.</p><p><strong>Data access:</strong> microdata come from Flash Eurobarometer 498 (ZA7806, GESIS, DOI 10.4232/1.13934) and Eurostat Digital Intensity indicators (isoc_e_dii). Raw files are public and are not redistributed; place them in <code>Data/Raw/</code> as described in the README.</p>",
+  "description": "<p>Replication codebase for the empirical study <strong>\"Market-Channel Orientation and Capability Constraints Shape Cross-Domain Sustainability Asymmetry in European Small and Medium-Sized Enterprises\"</strong> (submitted to <em>Business Strategy and the Environment</em>, Wiley).</p><p>Version 2.1.0 provides the fully verified and synchronized econometric replication package: a full-information joint bivariate probit with country and sector fixed effects, RECount, and country-clustered standard errors (discrete sample-average marginal effects, joint-covariance cross-equation tests, Holm adjustment); inverse-propensity weighting (two-stage bootstrap and influence-function variance) and 1:1 propensity-score matching with fixed effects in the propensity model and a logit-scale caliper (Rosenbaum bounds); clustered robustness checks (no RECount, survey weights, routed-only, strict Q14, sector-stratified) with probability-scale moderation; and an automated 31-test econometric verification suite.</p><p><strong>Data access:</strong> microdata come from Flash Eurobarometer 498 (ZA7806, GESIS, DOI 10.4232/1.13934) and Eurostat Digital Intensity indicators (isoc_e_dii). Raw files are public and are not redistributed; place them in <code>Data/Raw/</code> as described in the README.</p>",
   "upload_type": "software",
   "creators": [
     {
@@ -31,5 +31,5 @@
     "Business Strategy and the Environment",
     "cross-domain sustainability asymmetry"
   ],
-  "version": "2.0.0"
+  "version": "2.1.0"
 }
