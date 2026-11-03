@@ -39,7 +39,11 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Pt, RGBColor
 
-PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_cur_dir = os.path.dirname(os.path.abspath(__file__))
+if os.path.basename(_cur_dir).lower() in ("confidential", "internal"):
+    PROJECT_DIR = os.path.dirname(os.path.dirname(_cur_dir))
+else:
+    PROJECT_DIR = os.path.dirname(_cur_dir)
 REVISION_DIR = os.path.join(PROJECT_DIR, "Revision")
 MANUSCRIPT_DIR = os.path.join(PROJECT_DIR, "Manuscript")
 EXPORT_DIR = os.path.join(MANUSCRIPT_DIR, "Export")

@@ -44,7 +44,11 @@ import sys
 import numpy as np
 import pandas as pd
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_cur_dir = os.path.dirname(os.path.abspath(__file__))
+if os.path.basename(_cur_dir).lower() in ("confidential", "internal"):
+    ROOT = os.path.dirname(os.path.dirname(_cur_dir))
+else:
+    ROOT = os.path.dirname(_cur_dir)
 DATA_DIR = os.path.join(ROOT, "Data")
 if not os.path.exists(DATA_DIR) and os.path.exists(os.path.join(os.path.dirname(ROOT), "Data")):
     DATA_DIR = os.path.join(os.path.dirname(ROOT), "Data")

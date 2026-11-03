@@ -143,8 +143,12 @@ def main():
     for idx, (script_name, desc) in enumerate(PIPELINE_STEPS, start=1):
         script_path = os.path.join(SCRIPTS_DIR, script_name)
         if not os.path.exists(script_path):
-            print(f"\nERROR: Missing pipeline script: {script_path}")
-            sys.exit(1)
+            conf_path = os.path.join(SCRIPTS_DIR, "confidential", script_name)
+            if os.path.exists(conf_path):
+                script_path = conf_path
+            else:
+                print(f"\nERROR: Missing pipeline script: {script_path}")
+                sys.exit(1)
 
         print("\n" + "=" * 80)
         print(f"STEP {idx}/{len(PIPELINE_STEPS)}: {script_name} -- {desc}")

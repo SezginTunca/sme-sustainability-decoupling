@@ -25,3 +25,6 @@ Data/
 *.dbf
 *.cpg
 *.prj
+
+# Confidential / Internal Author Tools
+Scripts/confidential/
