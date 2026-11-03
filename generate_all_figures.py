@@ -49,7 +49,11 @@ from scipy import stats
 from scipy.stats import gaussian_kde
 
 # ── Paths ──────────────────────────────────────────────────────────────────
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+_this_dir = os.path.dirname(os.path.abspath(__file__))
+if os.path.basename(_this_dir) == "Scripts":
+    BASE_DIR = os.path.dirname(_this_dir)
+else:
+    BASE_DIR = _this_dir
 DATA_DIR = os.path.join(BASE_DIR, "Data")
 DATA_CSV = os.path.join(DATA_DIR, "Processed", "SME_Analytical_Final.csv")
 PS_CSV = os.path.join(DATA_DIR, "Processed", "IPW_Propensity_Scores.csv")
