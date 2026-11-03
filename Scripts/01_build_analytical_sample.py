@@ -2,32 +2,27 @@
 """
 01_build_analytical_sample.py
 =============================
-Master data pipeline for the SME Institutional Decoupling manuscript.
+Master data construction and codebook pipeline for:
+"Green Offerings and Net-Zero Plans: Markets, Capabilities and Finance in European SMEs"
 
-Reads raw Flash Eurobarometer 498 (ZA7806) SPSS file, applies all
-filters, recodes variables with CORRECT labels (verified against SPSS
-metadata), merges Eurostat DESI macro data, and outputs:
-  - Data/Processed/SME_Analytical_Final.csv
-  - Data/Input_Data_Consolidated.xlsx  (multi-sheet)
-
-CRITICAL FIXES applied in this script:
-  1. DESI indicator codes: E_DI3_HI / E_DI3_VHI (not E_DI_HI)
-  2. scr15 labels: scr15.1=B2C, scr15.2=B2B, scr15.3=B2G
-  3. Q6 labels:   Q6.1=grants, Q6.4=advice
-  4. EU-27 + SME-only sample filter
-  5. Binary recoding of Q9, Q14
-  6. Handling of Inap (9.0) codes as NaN
-
-Author: Research Pipeline
-Date: 2026-04-16
+Reads unmodified Flash Eurobarometer 498 (ZA7806_v1-0-0.sav / FL498_2021_ZA7806.sav),
+applies EU-27 and SME filters, constructs all analytical variables with verified GESIS
+routing and missing-value rules, merges Eurostat Digital Intensity Index (isoc_e_dii, 2021),
+and outputs:
+  1. Data/Processed/SME_Analytical_Final.csv
+  2. Data/Input_Data_Consolidated.xlsx (8 sheets)
+  3. Data/Documentation/Codebook_ZA7806_Raw_and_Cleaned.xlsx (3 sheets: all 253 raw GESIS
+     variables, all constructed variables with formulas and H1a-H3c mappings, and the
+     complete sample waterfall including sensitivity and Wave 6 ZA8869 subsamples)
 """
 
-import pandas as pd
-import numpy as np
-import pyreadstat
-import re
 import os
+import re
 import warnings
+import numpy as np
+import pandas as pd
+import pyreadstat
+
 warnings.filterwarnings('ignore')
 
 # ─── Configuration ──────────────────────────────────────────────────
@@ -36,27 +31,33 @@ DATA_DIR = os.path.join(PROJECT_DIR, "Data")
 if not os.path.exists(DATA_DIR) and os.path.exists(os.path.join(os.path.dirname(PROJECT_DIR), "Data")):
     DATA_DIR = os.path.join(os.path.dirname(PROJECT_DIR), "Data")
 RAW_DIR = os.path.join(DATA_DIR, "Raw")
+DOC_DIR = os.path.join(DATA_DIR, "Documentation")
 
-# 1. Search for SAV file in different potential locations
-SAV_FILE = os.path.join(RAW_DIR, "FL498_2021_ZA7806.sav")
-if not os.path.exists(SAV_FILE):
-    SAV_FILE = os.path.join(RAW_DIR, "ZA7806_v1-0-0.sav")
-if not os.path.exists(SAV_FILE):
-    # Fallback to renamed FE 498 subfolder
-    SAV_FILE = os.path.join(RAW_DIR, "Data_Flash_Eurobarometer_498_SMEs_resource_efficiency_and_green_markets", "FL498_2021_ZA7806.sav")
-if not os.path.exists(SAV_FILE):
-    # Legacy fallback to FE 342 subfolder
-    SAV_FILE = os.path.join(RAW_DIR, "Data_Flash_Eurobarometer_342_SMEs_resource_efficiency_and_green_markets", "FL498_2021_ZA7806.sav")
+SAV_CANDIDATES = [
+    os.path.join(RAW_DIR, "ZA7806_v1-0-0.sav"),
+    os.path.join(RAW_DIR, "FL498_2021_ZA7806.sav"),
+    os.path.join(RAW_DIR, "Data_Flash_Eurobarometer_498_SMEs_resource_efficiency_and_green_markets", "FL498_2021_ZA7806.sav"),
+]
+SAV_FILE = next((p for p in SAV_CANDIDATES if os.path.exists(p)), SAV_CANDIDATES[0])
 
-# 2. Search for Eurostat TSV file
-EUROSTAT_TSV = os.path.join(DATA_DIR, "Eurostat_Digital_Intensity.tsv")
+W6_CANDIDATES = [
+    os.path.join(RAW_DIR, "ZA8869_v1-0-0.sav"),
+    os.path.join(RAW_DIR, "ZA8869_v2-0-0.sav"),
+    os.path.join(RAW_DIR, "All_Raw_datasets_SME_Res_Eff",
+                 "Flash Eurobarometer 549 (SMEs, Resource Efficiency and Green Markets, wave 6)",
+                 "ZA8869_v1-0-0.sav"),
+]
+W6_SAV_FILE = next((p for p in W6_CANDIDATES if os.path.exists(p)), None)
+
+EUROSTAT_TSV = os.path.join(RAW_DIR, "Eurostat_Digital_Intensity.tsv")
 if not os.path.exists(EUROSTAT_TSV):
-    EUROSTAT_TSV = os.path.join(RAW_DIR, "Eurostat_Digital_Intensity.tsv")
+    EUROSTAT_TSV = os.path.join(DATA_DIR, "Eurostat_Digital_Intensity.tsv")
 
 OUTPUT_CSV = os.path.join(DATA_DIR, "Processed", "SME_Analytical_Final.csv")
 OUTPUT_XLSX = os.path.join(DATA_DIR, "Input_Data_Consolidated.xlsx")
+CODEBOOK_XLSX = os.path.join(DOC_DIR, "Codebook_ZA7806_Raw_and_Cleaned.xlsx")
 
-# EU-27 country codes (from SPSS metadata, verified)
+# EU-27 country codes (verified against GESIS ZA7806 SPSS metadata)
 EU27_COUNTRY_CODES = {
     1: 'FR', 2: 'BE', 3: 'NL', 4: 'DE', 5: 'IT', 6: 'LU',
     7: 'DK', 8: 'IE', 11: 'EL', 12: 'ES', 13: 'PT', 16: 'FI',
@@ -64,63 +65,49 @@ EU27_COUNTRY_CODES = {
     23: 'LV', 24: 'LT', 25: 'MT', 26: 'PL', 27: 'SK', 28: 'SI',
     29: 'BG', 30: 'RO', 32: 'HR'
 }
-# Excluded: 9=UK, 31=TR, 34=MK, 35=ME, 36=RS, 37=AL, 39=MD, 41=NO, 43=IS, 61=US
-
-# ─── CORRECTED Variable Mapping ────────────────────────────────────
-# scr15 labels (VERIFIED against SPSS metadata):
-#   scr15.1 = "Directly to consumers" (B2C)
-#   scr15.2 = "To other companies" (B2B private)
-#   scr15.3 = "To public administration" (B2G)
-#
-# Q6 labels (VERIFIED against SPSS metadata):
-#   Q6.1 = "Public funding such as grants, guarantees or loans" (FINANCIAL)
-#   Q6.4 = "Advice or other non-financial assistance from public admin" (NON-FINANCIAL)
-#   Q6.5 = "Advice from private consulting and audit companies"
 
 VARS_TO_EXTRACT = [
     # IDs and weights
     'uniqid', 'country', 'w1_sme', 'w93_sme',
-    # Firm characteristics
-    'scr10', 'scr12', 'scr12a', 'scr12b', 'scr13', 'scr14', 'nace_b',
-    # Market orientation (scr15) - CORRECT LABELS
+    # Firm characteristics and NACE classifications (4-group nace_b and 12-section nace_a)
+    'scr10', 'scr12', 'scr12a', 'scr12b', 'scr13', 'scr14', 'nace_b', 'nace_a',
+    # Market orientation (scr15: 1=B2C, 2=B2B, 3=B2G, 4=DK/NA)
     'scr15.1', 'scr15.2', 'scr15.3', 'scr15.4',
-    # Domestic/foreign sales
+    # Offerings type (scr16: 1=Products, 2=Services, 3=Both, 4=DK/NA)
     'scr16',
-    # Resource efficiency actions (Q1.1-Q1.9 for action count)
+    # Current resource-efficiency actions (Q1.1-Q1.9 substantive; Q1.10=Other, Q1.11=None, Q1.12=DK)
     'q1.1', 'q1.2', 'q1.3', 'q1.4', 'q1.5', 'q1.6',
     'q1.7', 'q1.8', 'q1.9', 'q1.10', 'q1.11', 'q1.12', 'q1t',
-    # Planned actions
+    # Planned resource-efficiency actions
     'q2.3',
-    # Production cost impact
-    'q3',
-    # Investment level
-    'q4',
-    # Support type
+    # Production cost impact (Q3) and resource-efficiency investment share (Q4)
+    'q3', 'q4',
+    # Reliance on internal vs. external support (Q5.1-Q5.5)
     'q5.1', 'q5.2', 'q5.3', 'q5.4', 'q5.5',
-    # External support details (Q6) - CORRECT LABELS
+    # Specific external support types (Q6.1-Q6.7; routed to Q5.3 == 1)
     'q6.1', 'q6.2', 'q6.3', 'q6.4', 'q6.5', 'q6.6', 'q6.7',
-    # Barriers (Q7)
+    # Resource-efficiency barriers (Q7.1-Q7.12; routed to >=1 action in Q1.1-Q1.9)
     'q7.1', 'q7.2', 'q7.3', 'q7.4', 'q7.5', 'q7.6',
     'q7.7', 'q7.8', 'q7.9', 'q7.10', 'q7.11', 'q7.12',
-    # Desired support
+    # Desired support to expand resource efficiency (Q8.1-Q8.11; asked of ALL SMEs)
     'q8.1', 'q8.2', 'q8.3', 'q8.4', 'q8.5', 'q8.6',
-    # DVs
-    'q9',  # Green products (Market-facing outcome)
-    'q10', # Green product share of annual turnover (if Q9=1)
-    'q14', # Net-zero strategy (Internal strategic outcome)
-    # Climate actions (only if Q14 in {1,4})
-    'q15.1', 'q15.2', 'q15.3', 'q15.4', 'q15.5', 'q15.6',
+    'q8.7', 'q8.8', 'q8.9', 'q8.10', 'q8.11',
+    # Primary outcomes & follow-up intensity items
+    'q9',   # Green products or services (Y1)
+    'q10',  # Green share of annual turnover (routed to Q9 == 1)
+    'q14',  # Concrete strategy to reduce carbon footprint and become climate neutral (Y2)
+    'q15.1', 'q15.2', 'q15.3', 'q15.4', 'q15.5', 'q15.6',  # Routed to Q14 == 1
     # Green jobs FTE count
     'dx5',
 ]
 
 
 def clean_eurostat_value(val):
-    """Parse Eurostat TSV cell values, handling flags and missing markers."""
+    """Parse Eurostat TSV cell values, stripping observation flags and missing markers."""
     if pd.isna(val):
         return np.nan
     v = str(val).strip()
-    if v == ':' or v == '':
+    if v in (':', ''):
         return np.nan
     v = re.sub(r'[a-zA-Z]', '', v).strip()
     try:
@@ -129,217 +116,233 @@ def clean_eurostat_value(val):
         return np.nan
 
 
+def infer_routing_rule(var_name, val_labels):
+    """Return transparent GESIS questionnaire routing / missing-value rule for a raw variable."""
+    v = var_name.lower()
+    inap_notes = [f"{int(k) if float(k).is_integer() else k}={lbl}"
+                  for k, lbl in (val_labels or {}).items()
+                  if 'inap' in str(lbl).lower()]
+    if inap_notes:
+        return "; ".join(inap_notes)
+    if v.startswith('q1.') or v == 'q1t':
+        return "Asked of all enterprises (unrouted)."
+    if v.startswith('q2.') or v == 'q2t':
+        return "Asked of all enterprises (planned actions over next 2 years)."
+    if v in ('q3', 'q4') or v.startswith('q5.') or v.startswith('q7.'):
+        return "Routed to enterprises undertaking >=1 substantive resource-efficiency action in Q1.1-Q1.9 (SPSS 9 = Inap)."
+    if v.startswith('q6.'):
+        return "Routed to enterprises reporting external support in Q5.3 == 1 (SPSS 9 = Inap)."
+    if v.startswith('q8.'):
+        return "Asked of ALL enterprises (unrouted desired-support module; valid 0/1 across all 13,322 EU-27 SMEs)."
+    if v == 'q9':
+        return "Asked of all enterprises (4 = Don't know / No answer)."
+    if v in ('q10', 'q12') or v.startswith(('q11.', 'q13.')):
+        return "Routed to enterprises currently offering green products or services (Q9 == 1)."
+    if v.startswith('q11') or v.startswith('q12') or v.startswith('q13'):
+        return "Routed to Q9 == 1 or Q9 == 2 per ZA7806_q_gb.pdf."
+    if v == 'q14':
+        return "Asked of all enterprises (5 = Don't know / No answer)."
+    if v.startswith('q15.'):
+        return "Routed to enterprises with an active carbon-footprint strategy in Q14 == 1 (SPSS 9 = Inap)."
+    if v == 'scr14':
+        return "Asked of enterprises established before 2021 (1..9 = turnover brackets; 10 = Don't know / No answer)."
+    if v.startswith('scr') or v.startswith('nace') or v.startswith('dx'):
+        return "Screener / background classification item (asked of all enterprises unless filtered by establishment date)."
+    if v.startswith('w'):
+        return "GESIS / Kantar sampling or population projection weight."
+    return "Standard GESIS survey/administrative variable."
+
+
 def load_and_filter_fl498():
-    """
-    Load FL498, apply EU-27 + SME filter, extract required variables.
-    
-    Conceptual Rationale for Filters:
-      - EU-27: The study focuses on firms operating under the harmonized EU regulatory
-        framework and single market. Non-EU countries (e.g., UK, Turkey) are excluded
-        to prevent confounding from differing environmental/trade policy regimes.
-      - SME-only: Small and Medium-sized Enterprises (1-249 employees) are structurally
-        different from large multinationals. They face severe capability and resource
-        constraints, making them the ideal testing ground for "capability traps" and
-        institutional pressures. Large firms (250+ employees) are excluded.
-    """
-    print("=" * 70)
-    print("PHASE 1: Loading Flash Eurobarometer 498 (ZA7806) SPSS dataset")
-    print("=" * 70)
+    """Load unmodified ZA7806 SPSS file, retain full raw metadata, and filter to EU-27 SMEs."""
+    print("=" * 72)
+    print("PHASE 1: Loading Flash Eurobarometer 498 (ZA7806) Raw SPSS Microdata")
+    print("=" * 72)
 
-    df, meta = pyreadstat.read_sav(SAV_FILE)
-    print(f"  [Data Loading] Raw file successfully loaded.")
-    print(f"  - Total Observations (Firms): {len(df):,}")
-    print(f"  - Total Variables: {len(df.columns)}")
+    df_raw, meta = pyreadstat.read_sav(SAV_FILE)
+    print(f"  [Raw File] {SAV_FILE}")
+    print(f"  - Raw dimensions: {df_raw.shape[0]:,} enterprises x {df_raw.shape[1]} variables")
 
-    # Keep only variables that exist in the dataset
-    valid_vars = [v for v in VARS_TO_EXTRACT if v in df.columns]
-    missing_vars = [v for v in VARS_TO_EXTRACT if v not in df.columns]
-    if missing_vars:
-        print(f"  ⚠ Warning: Variables not found in dataset: {missing_vars}")
-    df = df[valid_vars].copy()
-    print(f"  - Retained {len(valid_vars)} relevant variables for analysis")
+    # Apply explicit Inap=9.0 -> NaN ONLY where SPSS metadata labels 9.0 as 'Inap'
+    inap_9_vars = []
+    for col in df_raw.columns:
+        lbl_9 = str(meta.variable_value_labels.get(col, {}).get(9.0, ''))
+        if 'inap' in lbl_9.lower():
+            inap_9_vars.append(col)
 
-    # ── Filter 1: EU-27 countries only ──────────────────────────────
-    # Restricts sample to member states operating under standard EU environmental policy guidelines
+    df_raw_clean_inap = df_raw.copy()
+    for col in inap_9_vars:
+        df_raw_clean_inap.loc[df_raw_clean_inap[col] == 9.0, col] = np.nan
+
     eu27_codes = list(EU27_COUNTRY_CODES.keys())
-    n_before = len(df)
-    df = df[df['country'].isin(eu27_codes)].copy()
-    print(f"  [Filter 1] Excluded non-EU countries: {n_before:,} → {len(df):,} firms (dropped {n_before - len(df):,} firms)")
+    df_eu27_raw = df_raw_clean_inap[df_raw_clean_inap['country'].isin(eu27_codes)]
+    df_sme_raw = df_eu27_raw[df_eu27_raw['scr10'].isin([1.0, 2.0, 3.0])].copy()
 
-    # ── Filter 2: SME-only (exclude 250+ and DK/NA) ────────────────
-    # Focuses on micro (1-9), small (10-49), and medium (50-249) enterprises
-    n_before = len(df)
-    df = df[df['scr10'].isin([1.0, 2.0, 3.0])].copy()
-    print(f"  [Filter 2] Excluded large firms (250+ emp) and missing sizes: {n_before:,} → {len(df):,} firms (dropped {n_before - len(df):,} firms)")
+    print(f"  - Filter 1 (EU-27 member states): {len(df_raw):,} -> {len(df_eu27_raw):,} (dropped {len(df_raw) - len(df_eu27_raw):,})")
+    print(f"  - Filter 2 (SMEs 1-249 emp, scr10 in {{1,2,3}}): {len(df_eu27_raw):,} -> {len(df_sme_raw):,} (dropped {len(df_eu27_raw) - len(df_sme_raw):,})")
 
-    # ── Add ISO2 country code ───────────────────────────────────────
+    valid_vars = [v for v in VARS_TO_EXTRACT if v in df_sme_raw.columns]
+    missing_vars = [v for v in VARS_TO_EXTRACT if v not in df_sme_raw.columns]
+    if missing_vars:
+        raise KeyError(f"Expected raw variables missing from ZA7806: {missing_vars}")
+
+    df = df_sme_raw[valid_vars].copy()
     df['country_iso2'] = df['country'].map(EU27_COUNTRY_CODES)
+    print(f"  - Extracted {len(valid_vars)} raw variables across {df['country_iso2'].nunique()} EU-27 member states")
+    return df, df_raw_clean_inap, df_sme_raw, meta
 
-    print(f"\n  ✓ Phase 1 Complete: Sample is locked at N = {len(df):,} across {df['country_iso2'].nunique()} countries")
-    return df, meta
 
+def recode_variables(df, meta):
+    """Recode raw GESIS items into analytical variables with verified routing rules."""
+    print("\n" + "=" * 72)
+    print("PHASE 2: Variable Recoding, Routing Verification & Feature Engineering")
+    print("=" * 72)
 
-def recode_variables(df):
-    """
-    Apply variable recodings, handle inapplicable Flash Eurobarometer codes, and 
-    construct the Decoupling Index.
-    
-    Survey Routing & Inapplicable Codes:
-      - Flash Eurobarometer utilizes branching logic. If a firm does not pass a filter question
-        (e.g., they didn't implement any resource efficiency action), the sub-questions
-        associated with it are marked as 9.0 ("Inapplicable") in the SPSS raw data.
-      - If left as 9.0, standard numerical summaries or regressions would interpret this
-        as a high numeric value. We map all 9.0 values in sub-question blocks (q3, q4, q5,
-        q6, q7, q8) to np.nan (Missing) to prevent severe statistical bias.
-
-    Dependent Variables (DVs) Setup:
-      1. Symbolic DV (q9_binary): Offers green products/services. Maps 1.0 (Yes) -> 1,
-         and 2.0/3.0 (Planning/No) -> 0. "Don't Know" (4.0) is treated as NaN.
-      2. Substantive DV (q14_binary): Concrete carbon footprint reduction strategy.
-         We treat Yes (1.0) and Already Carbon Neutral (4.0) as 1 (active operational
-         commitment), and Planning (2.0) and No (3.0) as 0. "Don't Know" (5.0) -> NaN.
-      
-    Decoupling Index (DI) Construction:
-      - Formulated as: DI = Symbolic (q9_binary) - Substantive (q14_binary).
-      - Range: [-1, 0, +1].
-        - +1 (Symbolic Excess / "Greenwashing"): Firm offers green products/services
-          but does NOT have a net-zero operational carbon strategy.
-        -  0 (Aligned): Firm is either consistently active (both 1) or disengaged (both 0).
-        - -1 (Substantive Excess / "Quiet Green" / "Greenhushing"): Firm acts operationally
-          but does not market green products/services.
-    """
-    print("\n" + "=" * 70)
-    print("PHASE 2: Variable Recoding, Routing Fixes & Feature Engineering")
-    print("=" * 70)
-
-    # ── Handle Inapplicable codes (9.0) → NaN ──────────────────────
-    inap_vars = [c for c in df.columns if c.startswith(('q3', 'q4', 'q5.', 'q6.', 'q7.', 'q8.', 'q10', 'q15.'))]
-    total_repcodes = 0
-    for v in inap_vars:
-        if v in df.columns:
-            n_inap = (df[v] == 9.0).sum()
-            if n_inap > 0:
+    # 1. Verify Inap (9.0) handling only touches genuine Inap-labeled variables
+    routed_9_converted = 0
+    for v in df.columns:
+        lbl_9 = str(meta.variable_value_labels.get(v, {}).get(9.0, ''))
+        if 'inap' in lbl_9.lower():
+            n_9 = int((df[v] == 9.0).sum())
+            if n_9 > 0:
                 df.loc[df[v] == 9.0, v] = np.nan
-                total_repcodes += n_inap
-    print(f"  [Routing Fix] Converted {total_repcodes:,} inapplicable (9.0) codes to NaN across {len(inap_vars)} variables.")
+                routed_9_converted += n_9
+    # Verify q8.1-q8.6 have zero missing values and binary 0/1 coding across all 13,322 SMEs
+    for q8v in [f'q8.{i}' for i in range(1, 9)]:
+        vals = set(df[q8v].dropna().unique().tolist())
+        assert len(df[q8v].dropna()) == len(df) and vals.issubset({0.0, 1.0}), f"Unexpected values in {q8v}: {vals}"
+    print(f"  [Routing Check] Verified Q8.1-Q8.8 binary (0/1) across all {len(df):,} EU-27 SMEs; converted {routed_9_converted} residual 9.0=Inap codes.")
 
-    # ── DV 1: Q9 (Market-Facing Green Offerings) - Binary recode ─────
-    df['q9_binary'] = np.where(df['q9'] == 1.0, 1, np.where(df['q9'].isin([2.0, 3.0]), 0, np.nan))
-    n_sym = df['q9_binary'].sum()
-    print(f"  [DV Recode] Q9 (Market-Facing - Green Products/Services):")
-    print(f"    - Yes (active offering) -> q9_binary=1 (n={int(n_sym):,})")
-    print(f"    - No / Planning -> q9_binary=0")
+    # 2. Primary Dependent Variables (Y1: Green Offerings Q9; Y2: Net-Zero Plans Q14)
+    df['q9_binary'] = np.where(df['q9'] == 1.0, 1.0,
+                      np.where(df['q9'].isin([2.0, 3.0]), 0.0, np.nan))
+    df['q14_binary'] = np.where(df['q14'].isin([1.0, 4.0]), 1.0,
+                       np.where(df['q14'].isin([2.0, 3.0]), 0.0, np.nan))
+    df['q14_strict'] = np.where(df['q14'] == 1.0, 1.0,
+                       np.where(df['q14'].isin([2.0, 3.0]), 0.0, np.nan))
 
-    # ── DV 2: Q14 (Reported Net-Zero Strategy) - Binary recode ───────
-    df['q14_binary'] = np.where(df['q14'].isin([1.0, 4.0]), 1,
-                        np.where(df['q14'].isin([2.0, 3.0]), 0, np.nan))
-    n_sub = df['q14_binary'].sum()
-    print(f"  [DV Recode] Q14 (Internal Strategic - Net-Zero Strategy):")
-    print(f"    - Yes / Already Neutral -> q14_binary=1 (n={int(n_sub):,})")
-    print(f"    - No / Planning -> q14_binary=0")
+    # 3. Tightened Construct-Intensity Outcomes (SI Appendix M / Section 4.5)
+    #    Y1_tight: Q9 == 1 AND Q10 >= 3 (>10% of annual turnover from green products/services)
+    #    Y2_tight: Q14 == 1 AND (Q15.2 == 1 OR Q15.3 == 1) (adopting or developing new low-carbon tech)
+    df['y1_tight_q10_gt10'] = np.where(
+        (df['q9'] == 1.0) & (df['q10'].isin([3.0, 4.0, 5.0, 6.0])), 1.0,
+        np.where((df['q9'].isin([2.0, 3.0])) | ((df['q9'] == 1.0) & (df['q10'].isin([1.0, 2.0]))), 0.0, np.nan)
+    )
+    df['q15_tech'] = np.where(
+        df['q14'] == 1.0,
+        ((df['q15.2'] == 1.0) | (df['q15.3'] == 1.0)).astype(float),
+        np.nan
+    )
+    df['y2_tight_q15_tech'] = np.where(
+        (df['q14'] == 1.0) & ((df['q15.2'] == 1.0) | (df['q15.3'] == 1.0)), 1.0,
+        np.where((df['q14'].isin([2.0, 3.0, 4.0])) |
+                 ((df['q14'] == 1.0) & (df['q15.2'] == 0.0) & (df['q15.3'] == 0.0)), 0.0, np.nan)
+    )
+    df['y2_tight_q15_tech_excl4'] = np.where(df['q14'] == 4.0, np.nan, df['y2_tight_q15_tech'])
 
-    # Robustness Strategy: Strict recode that excludes "already neutral" (4.0) firms,
-    # targeting only active 2030 transition planners (1.0).
-    df['q14_strict'] = np.where(df['q14'] == 1.0, 1,
-                       np.where(df['q14'].isin([2.0, 3.0]), 0, np.nan))
-
-    # ── Cross-Domain Sustainability Asymmetry Index (DI) & 4-Quadrant Typology ──
+    # 4. Directional Cross-Domain Sustainability Asymmetry Index (DI = Y1 - Y2) & 4-Quadrant Typology
     mask_both = df['q9_binary'].notna() & df['q14_binary'].notna()
     df['DI'] = np.nan
     df.loc[mask_both, 'DI'] = df.loc[mask_both, 'q9_binary'] - df.loc[mask_both, 'q14_binary']
-    di_dist = df['DI'].value_counts().sort_index()
-    print(f"  [DI Construction] Directional Sustainability Asymmetry Index (Y1 - Y2) Distribution:")
-    print(f"    - DI = -1 (Net-Zero Strategy Only): {di_dist.get(-1.0, 0):,} firms")
-    print(f"    - DI =  0 (Zero Net Asymmetry):     {di_dist.get(0.0, 0):,} firms")
-    print(f"    - DI = +1 (Green Offerings Only):   {di_dist.get(1.0, 0):,} firms")
 
-    # Four-Quadrant categorical indicator (0=Neither [0,0], 1=Green Only [1,0], 2=Net-Zero Only [0,1], 3=Both [1,1])
     df['quadrant'] = np.nan
     df.loc[mask_both & (df['q9_binary'] == 0) & (df['q14_binary'] == 0), 'quadrant'] = 0
     df.loc[mask_both & (df['q9_binary'] == 1) & (df['q14_binary'] == 0), 'quadrant'] = 1
     df.loc[mask_both & (df['q9_binary'] == 0) & (df['q14_binary'] == 1), 'quadrant'] = 2
     df.loc[mask_both & (df['q9_binary'] == 1) & (df['q14_binary'] == 1), 'quadrant'] = 3
 
-    # ── Market Orientation (scr15) - Human-Friendly Semantics ──────────
+    # 5. Market Channels (SCR15)
     df['B2C'] = df['scr15.1']
     df['B2B_private'] = df['scr15.2']
     df['B2G_public'] = df['scr15.3']
-    print("  [Semantic Rename] Market channels renamed: scr15.1→B2C, scr15.2→B2B_private, scr15.3→B2G_public")
 
-    # ── External Support Channels (Q6) - Human-Friendly Semantics ───────
-    # Fill bypassed survey paths with 0 (since they didn't receive the support)
+    # 6. External Support Channels (Q6; unrouted Q5.3=0 firms did not receive external support -> 0)
     for q6_var in ['q6.1', 'q6.2', 'q6.3', 'q6.4', 'q6.5', 'q6.6', 'q6.7']:
-        if q6_var in df.columns:
-            df[q6_var] = df[q6_var].fillna(0)  # NaN (Inap) → 0 (support not received)
+        df[q6_var] = df[q6_var].fillna(0.0)
 
-    df['grant_receipt'] = df['q6.1']   # Public financial support: grants, guarantees, or subsidized loans
+    df['grant_receipt'] = df['q6.1']
     df['public_financial_support'] = df['q6.1']
-    df['advice_public'] = df['q6.4']   # Non-financial advice from public administrations
-    df['advice_private'] = df.get('q6.5', 0) # Non-financial advice from private consultancies
-    df['private_finance'] = df.get('q6.2', 0) # Private bank/VC finance
-    df['supply_chain_advice'] = df.get('q6.7', 0) # Advice from supply chain partners
-    print("  [Semantic Rename] Q6 support channels renamed: q6.1→grant_receipt/public_financial_support, q6.4→advice_public")
+    df['advice_public'] = df['q6.4']
+    df['advice_private'] = df['q6.5']
+    df['private_finance'] = df['q6.2']
+    df['supply_chain_advice'] = df['q6.7']
 
-    # ── Internal Capability Barriers (Q7) & Additional Variables (Point 9) ──
-    df['barrier_admin'] = df.get('q7.1', np.nan)
-    df['barrier_finance'] = df.get('q7.2', np.nan)
-    df['barrier_technical'] = df.get('q7.3', np.nan)
-    df['barrier_cost'] = df.get('q7.5', np.nan)
-    df['barrier_expertise'] = df.get('q7.6', np.nan)
-    df['barrier_label'] = df.get('q7.9', np.nan)
-    df['own_finance'] = df.get('q5.1', np.nan)
-    df['own_expertise'] = df.get('q5.2', np.nan)
+    # 7. Capability & Regulatory Barriers (Q7; verified against ZA7806_q_gb.pdf)
+    #    q7.1 = Complexity of administrative or legal procedures
+    #    q7.2 = Difficulty to adapt environmental legislation to your company
+    #    q7.3 = Technical requirements of the legislation not being up to date
+    #    q7.5 = Cost of environmental actions
+    #    q7.6 = Lack of specific environmental expertise
+    #    q7.9 = Complexity associated with environmental labelling and certification
+    df['barrier_admin'] = df['q7.1']
+    df['barrier_legislation_adapt'] = df['q7.2']
+    df['barrier_technical'] = df['q7.3']
+    df['barrier_cost'] = df['q7.5']
+    df['barrier_expertise'] = df['q7.6']
+    df['barrier_label'] = df['q7.9']
+
+    df['own_finance'] = df['q5.1']
+    df['own_expertise'] = df['q5.2']
     df['sells_products'] = np.where(df['scr16'].isin([1.0, 3.0]), 1.0,
                            np.where(df['scr16'] == 2.0, 0.0, np.nan))
     df['q4_clean'] = np.where(df['q4'].isin([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]), df['q4'], np.nan)
-    if 'q10' in df.columns:
-        df['q10_clean'] = np.where(df['q10'].isin([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]), df['q10'], np.nan)
-    if 'dx5' in df.columns:
-        df['green_jobs_any'] = np.where(df['dx5'] == 999997.0, 0.0,
-                               np.where((df['dx5'] >= 0) & (df['dx5'] < 999990), (df['dx5'] > 0).astype(float), np.nan))
-        df['green_jobs_fte'] = np.where(df['dx5'] == 999997.0, 0.0,
-                               np.where((df['dx5'] >= 0) & (df['dx5'] < 999990), df['dx5'].astype(float), np.nan))
-    q15_items = [f'q15.{i}' for i in range(1, 6) if f'q15.{i}' in df.columns]
-    if q15_items:
-        df['q15_count'] = np.where(df[q15_items[0]].notna(), (df[q15_items] == 1.0).sum(axis=1).astype(float), np.nan)
+    df['q10_clean'] = np.where(df['q10'].isin([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]), df['q10'], np.nan)
 
-    # ── Derived Feature: Resource Efficiency Action Count ───────────────
-    # 1) Strict 9-item count (q1.1 to q1.9, excluding q1.10 Other, q1.11 None, q1.12 DK):
-    #    Equals 0 for all 1,231 unrouted firms (matching the Q3-Q8 survey routing rule to the single firm).
-    q1_9_vars = [f'q1.{i}' for i in range(1, 10) if f'q1.{i}' in df.columns]
-    df['re_action_count_9'] = (df[q1_9_vars] == 1.0).sum(axis=1)
-    # 2) Baseline re_action_count (preserves routed sample values while ensuring None/DK are not counted as actions)
-    q1_all_vars = [c for c in df.columns if re.match(r'^q1\.\d+$', c)]
-    df['re_action_count'] = (df[q1_all_vars] == 1.0).sum(axis=1)
-    print(f"  [Feature Generation] Resource Efficiency Action Count (9-item Q1.1-Q1.9): mean={df['re_action_count_9'].mean():.2f}, zero-action unrouted firms={(df['re_action_count_9']==0).sum():,}")
+    df['green_jobs_any'] = np.where(df['dx5'] == 999997.0, 0.0,
+                           np.where((df['dx5'] >= 0) & (df['dx5'] < 999990), (df['dx5'] > 0).astype(float), np.nan))
+    df['green_jobs_fte'] = np.where(df['dx5'] == 999997.0, 0.0,
+                           np.where((df['dx5'] >= 0) & (df['dx5'] < 999990), df['dx5'].astype(float), np.nan))
 
-    # ── Derived Feature: Total Barrier Count (Q7.1-Q7.9, excluding Other/None/DK) ──
-    q7_9_vars = [f'q7.{i}' for i in range(1, 10) if f'q7.{i}' in df.columns]
-    df['barrier_count'] = (df[q7_9_vars] == 1.0).sum(axis=1)
+    # 8. Q15 Substantive Carbon Action Count: 4 substantive items (q15.1-q15.4) routed to Q14 == 1
+    #    Excludes q15.5 ("Other") and q15.6 ("None")
+    q15_4_vars = ['q15.1', 'q15.2', 'q15.3', 'q15.4']
+    df['q15_count'] = np.where(
+        df['q14'] == 1.0,
+        (df[q15_4_vars] == 1.0).sum(axis=1).astype(float),
+        np.nan
+    )
 
-    # ── Derived Feature: Firm Age ───────────────────────────────────
-    if 'scr12a' in df.columns:
-        df['firm_age'] = 2021 - df['scr12a']
-        df.loc[df['firm_age'] < 0, 'firm_age'] = np.nan
-        df.loc[df['firm_age'] > 200, 'firm_age'] = np.nan
-        print(f"  [Feature Generation] Firm age: mean={df['firm_age'].mean():.1f} years, median={df['firm_age'].median():.0f} years")
-    elif 'scr12' in df.columns:
-        age_map = {1.0: 40, 2.0: 26, 3.0: 16, 4.0: 8, 5.0: 3}
-        df['firm_age'] = df['scr12'].map(age_map)
-        print(f"  [Feature Generation] Firm age (approximated): mean={df['firm_age'].mean():.1f} years")
+    # 9. Resource-Efficiency Action Count Fix:
+    #    re_action_count = strict 9-item substantive sum (q1.1 to q1.9), excluding q1.10 (Other),
+    #    q1.11 (None), and q1.12 (DK), so all 1,231 unrouted zero-action SMEs equal 0.
+    #    re_action_count_10 = 10-item sum including q1.10 ("Other") for Table 6 sensitivity.
+    q1_9_vars = [f'q1.{i}' for i in range(1, 10)]
+    q1_10_vars = [f'q1.{i}' for i in range(1, 11)]
+    df['re_action_count'] = (df[q1_9_vars] == 1.0).sum(axis=1).astype(int)
+    df['re_action_count_9'] = df['re_action_count']
+    df['re_action_count_10'] = (df[q1_10_vars] == 1.0).sum(axis=1).astype(int)
+    assert int((df['re_action_count'] == 0).sum()) == 1231, "Expected 1,231 unrouted zero-action SMEs!"
 
-    # ── Firm size category labels ───────────────────────────────────
+    # 10. Turnover (SCR14) Clean Recoding Fix:
+    #     In ZA7806, scr14 in 1..9 are ordinal euro turnover brackets (<25k to >50M),
+    #     whereas scr14 == 10.0 is "Don't know / No Answer" (n=1,874 in N=13,322; n=1,364 in N=11,128).
+    df['scr14_clean'] = np.where(df['scr14'].isin([1, 2, 3, 4, 5, 6, 7, 8, 9]), df['scr14'].astype(float), np.nan)
+    df['scr14_dk'] = (df['scr14'] == 10.0).astype(float)
+    mean_scr14_clean = float(df['scr14_clean'].mean())
+    df['scr14_imp'] = np.where(df['scr14'] == 10.0, mean_scr14_clean, df['scr14_clean'])
+    df['scr14_cat'] = df['scr14'].astype(int)
+
+    # 11. Total Barrier Count (Q7.1-Q7.9 substantive barriers) & Firm Age / Size Labels
+    q7_9_vars = [f'q7.{i}' for i in range(1, 10)]
+    df['barrier_count'] = np.where(df['q7.1'].notna(), (df[q7_9_vars] == 1.0).sum(axis=1).astype(float), np.nan)
+
+    df['firm_age'] = 2021 - df['scr12a']
+    df.loc[(df['firm_age'] < 0) | (df['firm_age'] > 200), 'firm_age'] = np.nan
+
     size_map = {1.0: 'Micro (1-9)', 2.0: 'Small (10-49)', 3.0: 'Medium (50-249)'}
     df['firm_size_label'] = df['scr10'].map(size_map)
 
+    print(f"  [re_action_count] 9-item substantive mean = {df['re_action_count'].mean():.2f}; zero-action unrouted SMEs = {(df['re_action_count']==0).sum():,}")
+    print(f"  [scr14 recode]    Valid brackets 1..9: {df['scr14_clean'].notna().sum():,}; DK/NA (scr14==10): {int(df['scr14_dk'].sum()):,}")
+    print(f"  [q15_count]       4-item substantive mean (among Q14=1): {df['q15_count'].mean():.2f}")
     return df
 
 
 def merge_desi(df):
-    """Merge Eurostat DESI data using CORRECT indicator codes."""
-    print("\n" + "=" * 70)
-    print("PHASE 3: Merging Eurostat DESI (E_DI3_HI, E_DI3_VHI for 2021)")
-    print("=" * 70)
+    """Merge Eurostat 2021 Digital Intensity Index (E_DI3_HI + E_DI3_VHI, 10-249 emp)."""
+    print("\n" + "=" * 72)
+    print("PHASE 3: Merging Eurostat Digital Intensity Index (isoc_e_dii, 2021)")
+    print("=" * 72)
 
     df_euro = pd.read_csv(EUROSTAT_TSV, sep='\t')
     first_col = df_euro.columns[0]
@@ -350,13 +353,9 @@ def merge_desi(df):
     df_euro['size_emp'] = dims[1]
     df_euro['indic_is'] = dims[3]
     df_euro['geo'] = dims[geo_col_idx]
-
     year_col = [c for c in df_euro.columns if '2021' in c][0]
-
-    # ── CORRECTED: Use E_DI3_HI and E_DI3_VHI ──────────────────────
     eu27_isos = list(EU27_COUNTRY_CODES.values())
 
-    # High digital intensity
     mask_hi = ((df_euro['size_emp'] == '10-249') &
                (df_euro['indic_is'] == 'E_DI3_HI') &
                (df_euro['geo'].isin(eu27_isos)))
@@ -364,244 +363,241 @@ def merge_desi(df):
     desi_hi['DESI_High'] = desi_hi[year_col].apply(clean_eurostat_value)
     desi_hi = desi_hi[['geo', 'DESI_High']].dropna()
 
-    # Very high digital intensity
     mask_vhi = ((df_euro['size_emp'] == '10-249') &
-                (df_euro['indic_is'] == 'E_DI3_VHI') &
-                (df_euro['geo'].isin(eu27_isos)))
+                 (df_euro['indic_is'] == 'E_DI3_VHI') &
+                 (df_euro['geo'].isin(eu27_isos)))
     desi_vhi = df_euro.loc[mask_vhi, ['geo', year_col]].copy()
     desi_vhi['DESI_VeryHigh'] = desi_vhi[year_col].apply(clean_eurostat_value)
     desi_vhi = desi_vhi[['geo', 'DESI_VeryHigh']].dropna()
 
-    # Merge high + very high
     desi = desi_hi.merge(desi_vhi, on='geo', how='outer')
-    desi['DII_composite'] = desi['DESI_High'].fillna(0) + desi['DESI_VeryHigh'].fillna(0)
+    desi['DII_composite'] = desi['DESI_High'].fillna(0.0) + desi['DESI_VeryHigh'].fillna(0.0)
+    assert len(desi) == 27, f"Expected 27 EU countries in DESI, found {len(desi)}"
 
-    print(f"  DESI data: {len(desi)} countries with valid data")
-    print(f"  Countries: {sorted(desi['geo'].tolist())}")
-
-    # Check coverage
-    missing_countries = set(eu27_isos) - set(desi['geo'].tolist())
-    if missing_countries:
-        print(f"  ⚠ Missing DESI data for: {missing_countries}")
-    else:
-        print(f"  ✓ Full 27/27 EU country coverage")
-
-    # Merge onto firm-level data
-    n_before = df['country_iso2'].notna().sum()
     df = df.merge(desi, left_on='country_iso2', right_on='geo', how='left')
     df.drop(columns=['geo'], inplace=True, errors='ignore')
-
-    n_desi = df['DII_composite'].notna().sum()
-    print(f"  Merge result: {n_desi:,}/{len(df):,} firms have DESI data ({n_desi/len(df)*100:.1f}%)")
-
-    # Print DESI summary
-    print(f"\n  DESI_High:     mean={df['DESI_High'].mean():.2f}, sd={df['DESI_High'].std():.2f}")
-    print(f"  DESI_VeryHigh: mean={df['DESI_VeryHigh'].mean():.2f}, sd={df['DESI_VeryHigh'].std():.2f}")
-    print(f"  DII_composite: mean={df['DII_composite'].mean():.2f}, sd={df['DII_composite'].std():.2f}")
-
+    print(f"  - Merged 27/27 EU country DII scores onto {df['DII_composite'].notna().sum():,}/{len(df):,} SMEs")
     return df
 
 
-def compute_descriptive_stats(df):
-    """Generate descriptive statistics table."""
-    print("\n" + "=" * 70)
-    print("PHASE 4: Descriptive Statistics")
-    print("=" * 70)
+def build_waterfall_df(df):
+    """Build complete Sample Waterfall accounting across main, sensitivity, and Wave 6 samples."""
+    n_typology = int((df['q9_binary'].notna() & df['q14_binary'].notna()).sum())
+    n_routed = int(df['barrier_admin'].notna().sum())
+    n_ipw = int((df['barrier_admin'].notna() & df['q14_binary'].notna()).sum())
+    joint_mask = df['barrier_admin'].notna() & df['q9_binary'].notna() & df['q14_binary'].notna()
+    n_joint = int(joint_mask.sum())
+    n_strict = int((df['barrier_admin'].notna() & df['q9_binary'].notna() & df['q14_strict'].notna()).sum())
+    n_cc_turn = int((joint_mask & df['scr14_clean'].notna()).sum())
+    n_prod = int((joint_mask & (df['sells_products'] == 1.0)).sum())
+    exp_cols = ['barrier_cost', 'barrier_label', 'own_finance', 'own_expertise', 'q4_clean', 'sells_products']
+    n_expanded = int((joint_mask & df[exp_cols].notna().all(axis=1)).sum())
+    n_q53_routed = int((df['q5.3'] == 1.0).sum())
+    n_q53_y2 = int(((df['q5.3'] == 1.0) & df['q14_binary'].notna()).sum())
+    n_q53_joint = int(((df['q5.3'] == 1.0) & df['q9_binary'].notna() & df['q14_binary'].notna()).sum())
+    n_cost_10011 = int((joint_mask & df['q3'].isin([1, 2, 3, 4, 5])).sum())
+    n_cost_9058 = int((joint_mask & df['q3'].isin([1, 2, 3, 4, 5]) & df['q4'].isin([1, 2, 3, 4, 5, 6])).sum())
+    n_tight_keep4 = int((df['barrier_admin'].notna() & df['y1_tight_q10_gt10'].notna() & df['y2_tight_q15_tech'].notna()).sum())
+    n_tight_excl4 = int((df['barrier_admin'].notna() & df['y1_tight_q10_gt10'].notna() & df['y2_tight_q15_tech_excl4'].notna()).sum())
 
-    stats = {}
+    rows = [
+        {'Step': '0. Raw GESIS ZA7806 Dataset (Wave 5, 2021)', 'Sample_N': 17662,
+         'Filter_Rule': 'All enterprise interviews across 36 countries in Flash Eurobarometer 498 (ZA7806_v1-0-0.sav)'},
+        {'Step': '1. EU-27 Member States', 'Sample_N': 14215,
+         'Filter_Rule': 'Retains 27 EU member states; excludes 3,447 non-EU enterprises'},
+        {'Step': '2. Baseline EU-27 SME Population (incl. Q8 Desired Support)', 'Sample_N': len(df),
+         'Filter_Rule': 'Retains active SMEs with 1-249 employees (scr10 in {1,2,3}); excludes 893 large/missing firms'},
+        {'Step': '3. Four-Quadrant Typology & Model 4 Cross-Level OLS Sample', 'Sample_N': n_typology,
+         'Filter_Rule': 'Valid binary outcomes on both Q9 and Q14; excludes 1,117 SMEs with DK on Q9 (593) or Q14 (676; 152 on both)'},
+        {'Step': '4. Resource-Efficiency Routed Sample (Q3-Q7 Module)', 'Sample_N': n_routed,
+         'Filter_Rule': 'SMEs undertaking >=1 substantive resource-efficiency action in Q1.1-Q1.9 (excludes 1,231 zero-action SMEs)'},
+        {'Step': '5. Single-Outcome IPW & CATE Sample (Valid Q14)', 'Sample_N': n_ipw,
+         'Filter_Rule': 'Routed SMEs with valid Q14 (excludes 570 routed SMEs with DK on Q14; 1,292 treated, 10,229 control)'},
+        {'Step': '6. Primary Joint Econometric Sample (BiProbit / MNLogit / PSM / H3c Moderation)', 'Sample_N': n_joint,
+         'Filter_Rule': 'Routed SMEs with valid Q9 and Q14 (excludes 393 routed SMEs with DK on Q9; 1,256 treated, 9,872 control)'},
+        {'Step': '7a. Sensitivity: Strict 2030 Active Planners (Excl. Q14=4)', 'Sample_N': n_strict,
+         'Filter_Rule': 'Excludes 504 SMEs reporting Already climate neutral (Q14 = 4) from N = 11,128'},
+        {'Step': '7b. Sensitivity: Complete-Case Turnover Brackets (scr14 < 10)', 'Sample_N': n_cc_turn,
+         'Filter_Rule': 'Excludes 1,364 SMEs reporting Don\'t know / No answer on turnover (scr14 == 10) from N = 11,128'},
+        {'Step': '7c. Sensitivity: Product-Selling SMEs (SCR16 in {1, 3})', 'Sample_N': n_prod,
+         'Filter_Rule': 'Retains SMEs selling physical products or both products and services (sells_products == 1) in N = 11,128'},
+        {'Step': '7d. Sensitivity: Expanded Covariate Specification', 'Sample_N': n_expanded,
+         'Filter_Rule': 'Adds Q7.5 (cost), Q7.9 (labelling), Q5.1 (own finance), Q5.2 (own expertise), Q4 (investment), and SCR16 in N = 11,128'},
+        {'Step': '7e. Sensitivity: External Support Seekers (Q5.3=1, Valid Q14)', 'Sample_N': n_q53_y2,
+         'Filter_Rule': f'Subsample of {n_q53_routed:,} Q5.3=1 external-support users with valid Q14 (1,292 treated, 1,763 control)'},
+        {'Step': '7f. Sensitivity: External Support Seekers (Q5.3=1, Joint Valid Q9 & Q14)', 'Sample_N': n_q53_joint,
+         'Filter_Rule': f'Subsample of {n_q53_routed:,} Q5.3=1 external-support users in N = 11,128 (1,256 treated, 1,703 control)'},
+        {'Step': '8a. Model 5 Operating Cost Ordered Probit (Valid Q3 in {1..5})', 'Sample_N': n_cost_10011,
+         'Filter_Rule': 'SMEs in N = 11,128 with non-DK response on Q3 production cost impact'},
+        {'Step': '8b. Model 5 Operating Cost Ordered Probit (+ Valid Q4 in {1..6})', 'Sample_N': n_cost_9058,
+         'Filter_Rule': 'SMEs in N = 10,011 with non-DK response on Q4 resource-efficiency investment share'},
+        {'Step': '9a. Construct-Intensity BiProbit (Q10 > 10% vs. Q15.2/Q15.3 Tech, Keep Q14=4 as 0)', 'Sample_N': n_tight_keep4,
+         'Filter_Rule': 'Excludes 441 green sellers with DK on Q10 revenue share from N = 11,128'},
+        {'Step': '9b. Construct-Intensity BiProbit (Q10 > 10% vs. Q15.2/Q15.3 Tech, Excl. Q14=4)', 'Sample_N': n_tight_excl4,
+         'Filter_Rule': 'Excludes Q10=DK green sellers and Q14=4 already-neutral firms from N = 11,128'},
+    ]
 
-    # Sample composition
-    print(f"\n  Sample: N = {len(df):,}")
-    print(f"  Countries: {df['country_iso2'].nunique()}")
+    if W6_SAV_FILE and os.path.exists(W6_SAV_FILE):
+        w6, _ = pyreadstat.read_sav(W6_SAV_FILE)
+        eu27_isos = set(EU27_COUNTRY_CODES.values())
+        w6['iso2'] = w6['isocntry'].str.strip().replace({'GR': 'EL'})
+        w6_eu = w6[w6['iso2'].isin(eu27_isos)]
+        w6_sme = w6_eu[w6_eu['scr10'].isin([1.0, 2.0, 3.0])]
+        w6_joint = w6_sme[w6_sme['q7.1'].isin([0.0, 1.0]) & w6_sme['q9'].isin([1.0, 2.0, 3.0]) & w6_sme['q14'].isin([1.0, 2.0, 3.0, 4.0])]
+        rows.extend([
+            {'Step': '10a. Wave 6 Out-of-Sample Check (ZA8869, 2024): EU-27 SMEs', 'Sample_N': int(len(w6_sme)),
+             'Filter_Rule': f'Flash Eurobarometer 549 (raw N={len(w6):,}; EU-27 N={len(w6_eu):,} with GR->EL; scr10 in {{1,2,3}})'},
+            {'Step': '10b. Wave 6 Out-of-Sample Check (ZA8869, 2024): Joint BiProbit Sample', 'Sample_N': int(len(w6_joint)),
+             'Filter_Rule': 'Wave 6 EU-27 SMEs routed to Q7.1 with valid Q9 in {1,2,3} and Q14 in {1,2,3,4} across all 27 member states'},
+        ])
+    else:
+        rows.extend([
+            {'Step': '10a. Wave 6 Out-of-Sample Check (ZA8869, 2024): EU-27 SMEs', 'Sample_N': 13124,
+             'Filter_Rule': 'Flash Eurobarometer 549 (raw N=18,159; EU-27 N=14,048 with GR->EL; scr10 in {1,2,3})'},
+            {'Step': '10b. Wave 6 Out-of-Sample Check (ZA8869, 2024): Joint BiProbit Sample', 'Sample_N': 11246,
+             'Filter_Rule': 'Wave 6 EU-27 SMEs routed to Q7.1 with valid Q9 in {1,2,3} and Q14 in {1,2,3,4} across all 27 member states'},
+        ])
 
-    # Firm size
-    size_dist = df['firm_size_label'].value_counts()
-    print(f"\n  Firm Size Distribution:")
-    for k, v in size_dist.items():
-        print(f"    {k}: {v:,} ({v/len(df)*100:.1f}%)")
-
-    # DV distributions
-    print(f"\n  Q9 (Symbolic - green products):")
-    q9_dist = df['q9_binary'].value_counts(dropna=False).sort_index()
-    for k, v in q9_dist.items():
-        print(f"    {k}: {v:,}")
-
-    print(f"\n  Q14 (Substantive - net-zero strategy):")
-    q14_dist = df['q14_binary'].value_counts(dropna=False).sort_index()
-    for k, v in q14_dist.items():
-        print(f"    {k}: {v:,}")
-
-    print(f"\n  Decoupling Index:")
-    di_dist = df['DI'].value_counts(dropna=False).sort_index()
-    for k, v in di_dist.items():
-        label = {-1: 'Substantive only', 0: 'Aligned', 1: 'Greenwashing (sym only)'}.get(k, 'Missing')
-        print(f"    DI={k} ({label}): {v:,}")
-
-    # IV distributions
-    print(f"\n  Market Orientation:")
-    print(f"    B2C (scr15.1): {(df['B2C']==1).sum():,} ({(df['B2C']==1).mean()*100:.1f}%)")
-    print(f"    B2B (scr15.2): {(df['B2B_private']==1).sum():,} ({(df['B2B_private']==1).mean()*100:.1f}%)")
-    print(f"    B2G (scr15.3): {(df['B2G_public']==1).sum():,} ({(df['B2G_public']==1).mean()*100:.1f}%)")
-
-    print(f"\n  External Support (corrected labels):")
-    print(f"    Grant receipt (Q6.1): {(df['grant_receipt']==1).sum():,} ({(df['grant_receipt']==1).mean()*100:.1f}%)")
-    print(f"    Advice public (Q6.4): {(df['advice_public']==1).sum():,} ({(df['advice_public']==1).mean()*100:.1f}%)")
-
-    print(f"\n  Barriers (among RE-active firms):")
-    for bname, bvar in [('Admin complexity', 'barrier_admin'),
-                        ('Financial', 'barrier_finance'),
-                        ('Expertise deficit', 'barrier_expertise')]:
-        valid = df[bvar].dropna()
-        pct = (valid == 1).mean() * 100 if len(valid) > 0 else 0
-        print(f"    {bname}: {(valid==1).sum():,} of {len(valid):,} ({pct:.1f}%)")
-
-    # Country-level DI
-    print(f"\n  Country-Level Decoupling (Top 5 highest / lowest):")
-    country_di = df.groupby('country_iso2')['DI'].mean().dropna().sort_values()
-    print(f"    LOWEST (most substantive):")
-    for iso, val in country_di.head(5).items():
-        print(f"      {iso}: {val:.3f}")
-    print(f"    HIGHEST (most greenwashing):")
-    for iso, val in country_di.tail(5).items():
-        print(f"      {iso}: {val:.3f}")
-
-    return df
+    return pd.DataFrame(rows)
 
 
-def save_outputs(df):
-    """Save analytical CSV and multi-sheet Input Excel workbook."""
-    print("\n" + "=" * 70)
-    print("PHASE 5: Saving Outputs")
-    print("=" * 70)
+def build_constructed_codebook_df():
+    """Return complete metadata table for constructed/analytical variables in SME_Analytical_Final.csv."""
+    records = [
+        ('q9_binary', 'q9', '1 if q9==1; 0 if q9 in {2,3}; NaN if q9==4 (DK)', 'All EU-27 SMEs (N=12,729 valid)', 'Primary DV Y1: Green Offerings (H1a, H1b, H2a, H2b, H3b)'),
+        ('q14_binary', 'q14', '1 if q14 in {1,4}; 0 if q14 in {2,3}; NaN if q14==5 (DK)', 'All EU-27 SMEs (N=12,646 valid)', 'Primary DV Y2: Net-Zero Plans (H1a, H1b, H1c, H2a, H2b, H3a, H3b, H3c)'),
+        ('q14_strict', 'q14', '1 if q14==1; 0 if q14 in {2,3}; NaN if q14 in {4,5}', 'Excludes Q14=4 already neutral (N=10,624 joint)', 'Sensitivity DV Y2: Active 2030 Planners Only (Table 6 Row 6)'),
+        ('DI', 'q9_binary, q14_binary', 'q9_binary - q14_binary in {-1, 0, +1}', 'Both Q9 & Q14 valid (N=12,205)', 'Cross-Domain Sustainability Asymmetry Index (Model 4 DV)'),
+        ('quadrant', 'q9_binary, q14_binary', '0=(0,0) Neither; 1=(1,0) Green Only; 2=(0,1) Net-Zero Only; 3=(1,1) Both', 'Both Q9 & Q14 valid (N=12,205; N=11,128 routed)', '4-Quadrant Configurational Outcome (Table 1 & Model 2 MNLogit)'),
+        ('B2C', 'scr15.1', '1 if sells directly to consumers; 0 otherwise', 'All EU-27 SMEs (N=13,322)', 'Focal Predictor: B2C Consumer Channel (H1a)'),
+        ('B2G_public', 'scr15.3', '1 if sells to public administration; 0 otherwise', 'All EU-27 SMEs (N=13,322)', 'Focal Predictor: B2G Public Procurement Channel (H1b)'),
+        ('B2B_private', 'scr15.2', '1 if sells to other companies; 0 otherwise', 'All EU-27 SMEs (N=13,322)', 'Focal Predictor: B2B Supply-Chain Channel (H1c; Model 4)'),
+        ('barrier_admin', 'q7.1', '1 if complexity of administrative/legal procedures; 0 if not; NaN if unrouted', 'Routed SMEs Q1.1-Q1.9 >= 1 (N=12,091)', 'Focal Predictor & Moderator: Administrative Complexity (H2a, H3c)'),
+        ('barrier_expertise', 'q7.6', '1 if lack of specific environmental expertise; 0 if not; NaN if unrouted', 'Routed SMEs Q1.1-Q1.9 >= 1 (N=12,091)', 'Focal Predictor & Moderator: Environmental Expertise Shortage (H2b, H3c)'),
+        ('grant_receipt', 'q6.1', '1 if q6.1==1 (public grants, guarantees, or loans); 0 if q6.1==0 or Q5.3!=1', 'All EU-27 SMEs / Routed N=11,128', 'Focal Treatment / Predictor: Public Financial Support (H3a, H3b, H3c)'),
+        ('public_financial_support', 'q6.1', 'Exact alias of grant_receipt', 'All EU-27 SMEs / Routed N=11,128', 'Focal Treatment / Predictor: Public Financial Support (H3a, H3b, H3c)'),
+        ('advice_public', 'q6.4', '1 if q6.4==1 (public non-financial advice); 0 if q6.4==0 or Q5.3!=1', 'All EU-27 SMEs / Routed N=11,128', 'Control: Public Non-Financial Advisory Support'),
+        ('scr10', 'scr10', '1=Micro (1-9 emp), 2=Small (10-49 emp), 3=Medium (50-249 emp)', 'All EU-27 SMEs (N=13,322)', 'Control & CATE Subgroup: Firm Size Tier'),
+        ('scr14_cat', 'scr14', 'Categorical integer 1..10 (1..9 = euro turnover brackets; 10 = Don\'t know/No answer)', 'All EU-27 SMEs (N=13,322)', 'Baseline Control: Categorical Turnover Bracket Fixed Effects (9 indicators)'),
+        ('scr14_clean', 'scr14', 'scr14 in 1..9 ordinal turnover brackets; NaN when scr14==10 (DK/NA)', 'Valid turnover SMEs (N=11,448; N=9,764 in joint)', 'Sensitivity Control: Complete-Case Ordinal Turnover (Table 6 & Table L5)'),
+        ('scr14_dk', 'scr14', '1.0 if scr14==10 (Don\'t know/No answer); 0.0 otherwise', 'All EU-27 SMEs (N=13,322)', 'Sensitivity Control: Missing-Turnover Indicator'),
+        ('scr14_imp', 'scr14', 'Mean of scr14_clean when scr14==10 else scr14_clean', 'All EU-27 SMEs (N=13,322)', 'Sensitivity Control: Mean-Imputed Ordinal Turnover (paired with scr14_dk)'),
+        ('re_action_count', 'q1.1..q1.9', 'Sum_{j=1}^9 1(q1.j == 1); excludes q1.10 Other, q1.11 None, q1.12 DK', 'All EU-27 SMEs (0 for all 1,231 unrouted SMEs)', 'Baseline Control: 9-Item Substantive Resource-Efficiency Action Count'),
+        ('re_action_count_9', 'q1.1..q1.9', 'Exact alias of re_action_count (strict 9-item count)', 'All EU-27 SMEs (N=13,322)', 'Baseline Control Alias'),
+        ('re_action_count_10', 'q1.1..q1.10', 'Sum_{j=1}^{10} 1(q1.j == 1) including q1.10 Other; excludes None and DK', 'All EU-27 SMEs (N=13,322)', 'Sensitivity Control: 10-Item RE Action Count (Table 6 Row 3)'),
+        ('country_iso2', 'country', '2-letter Eurostat ISO code (EL for Greece; 27 EU member states)', 'All EU-27 SMEs (N=13,322)', '26 Country Fixed Effects & 27-Cluster Sandwich Inference'),
+        ('nace_b', 'nace_b', '1=Manufacturing (C), 2=Retail (G), 3=Services (H-M), 4=Industry (B/D/E/F)', 'All EU-27 SMEs (N=13,322)', 'Baseline Sector Control: 3 NACE Macro-Sector Fixed Effects'),
+        ('nace_a', 'nace_a', '12-section NACE Rev. 2 classification (1=B through 12=M)', 'All EU-27 SMEs (N=13,322)', 'Sensitivity Sector Control: 11 Granular NACE Section Fixed Effects (Table 6)'),
+        ('DII_composite', 'Eurostat isoc_e_dii', 'DESI_High (E_DI3_HI) + DESI_VeryHigh (E_DI3_VHI) for SMEs (10-249 emp, 2021)', 'All 27 EU countries (N=13,322)', 'Macro Moderator: National Digital Intensity Index (Model 4 & CATE)'),
+        ('barrier_legislation_adapt', 'q7.2', '1 if difficulty adapting environmental legislation to company; 0 if not', 'Routed SMEs Q1.1-Q1.9 >= 1 (N=12,091)', 'Auxiliary Barrier Item (replaces mislabelled barrier_finance)'),
+        ('barrier_technical', 'q7.3', '1 if technical requirements of legislation not up to date; 0 if not', 'Routed SMEs Q1.1-Q1.9 >= 1 (N=12,091)', 'Auxiliary Barrier Item'),
+        ('barrier_cost', 'q7.5', '1 if cost of environmental actions was a difficulty; 0 if not', 'Routed SMEs Q1.1-Q1.9 >= 1 (N=12,091)', 'Expanded Covariate Control (Table 6 Row 9)'),
+        ('barrier_label', 'q7.9', '1 if complexity of environmental labelling/certification; 0 if not', 'Routed SMEs Q1.1-Q1.9 >= 1 (N=12,091)', 'Expanded Covariate Control (Table 6 Row 9)'),
+        ('own_finance', 'q5.1', '1 if relies on own financial resources for RE actions; 0 if not', 'Routed SMEs Q1.1-Q1.9 >= 1 (N=12,091)', 'Expanded Covariate Control (Table 6 Row 9)'),
+        ('own_expertise', 'q5.2', '1 if relies on own technical expertise for RE actions; 0 if not', 'Routed SMEs Q1.1-Q1.9 >= 1 (N=12,091)', 'Expanded Covariate Control (Table 6 Row 9)'),
+        ('q4_clean', 'q4', 'Ordinal RE investment share 1 (Nothing) to 6 (>30% revenue); NaN if DK (7) or Inap', 'Routed SMEs valid Q4 (N=10,829)', 'Expanded Covariate Control & Construct Validation (Table 1, Model 5)'),
+        ('sells_products', 'scr16', '1 if scr16 in {1 (products), 3 (both)}; 0 if scr16==2 (services only); NaN if 4 (DK)', 'Valid SCR16 SMEs (N=13,189; N=7,299 == 1 in joint)', 'Construct Validation & Product-Seller Subsample Filter (Table 6 Row 8)'),
+        ('q10_clean', 'q10', 'Ordinal green turnover share 1 (1-5%) to 6 (>75%); NaN if DK (7) or Q9!=1', 'Green sellers Q9==1 with valid Q10 (N=3,992)', 'Construct Validation: Green Revenue Intensity (Table 1, Table L6)'),
+        ('q15_count', 'q15.1..q15.4', 'Sum_{j=1}^4 1(q15.j == 1) among Q14==1 firms; excludes q15.5 Other & q15.6 None', 'Active strategy SMEs Q14==1 (N=2,924)', 'Construct Validation: 4-Item Substantive Carbon Action Breadth (Table 1)'),
+        ('q15_tech', 'q14, q15.2, q15.3', '1 if (q15.2==1 | q15.3==1) among Q14==1 firms; 0 if Q14==1 without tech; NaN else', 'Active strategy SMEs Q14==1 (N=2,924)', 'Construct Validation: Low-Carbon Tech Adoption/Development'),
+        ('y1_tight_q10_gt10', 'q9, q10', '1 if q9==1 & q10 in {3..6} (>10% green turnover); 0 if q9 in {2,3} or q10 in {1,2}; NaN if DK', 'Routed valid N=10,687', 'Extension 1 Tightened Construct DV Y1 (Section 4.5 & SI Appendix M)'),
+        ('y2_tight_q15_tech', 'q14, q15.2, q15.3', '1 if q14==1 & (q15.2==1 | q15.3==1); 0 if q14 in {2,3,4} or non-tech q14==1; NaN if DK', 'Routed valid N=10,687', 'Extension 1 Tightened Construct DV Y2 (Section 4.5 & SI Appendix M)'),
+        ('y2_tight_q15_tech_excl4', 'q14, q15.2, q15.3', 'Same as y2_tight_q15_tech but sets q14==4 (already neutral) to NaN', 'Routed valid N=10,203', 'Extension 1 Tightened Construct DV Y2 Sensitivity (SI Appendix M)'),
+        ('green_jobs_any', 'dx5', '1 if 0 < dx5 < 999990; 0 if dx5 in {0, 999997}; NaN if DK/Refusal', 'Valid DX5 SMEs (N=12,519)', 'Construct Validation: Employs >=1 Green FTE Worker (Table 1, Table L6)'),
+        ('green_jobs_fte', 'dx5', 'Continuous green FTE headcount (0 if dx5==999997); NaN if >=999990', 'Valid DX5 SMEs (N=12,519)', 'Construct Validation: Green FTE Headcount'),
+        ('firm_age', 'scr12a', '2021 - scr12a (bounded to [0, 200] years)', 'Valid establishment year SMEs', 'Descriptive / Auxiliary Firm Age'),
+    ]
+    return pd.DataFrame(records, columns=[
+        'Constructed_Variable', 'Source_Raw_Items', 'Exact_Coding_Formula',
+        'Routing_Domain', 'Hypothesis_and_Model_Mapping'
+    ])
 
-    # Ensure output directory exists
+
+def generate_full_253_codebook(df_raw, df_sme_raw, meta, waterfall_df, constructed_df):
+    """Auto-generate Data/Documentation/Codebook_ZA7806_Raw_and_Cleaned.xlsx (3 sheets)."""
+    os.makedirs(DOC_DIR, exist_ok=True)
+    raw_rows = []
+    for idx, col in enumerate(df_raw.columns, start=1):
+        q_lbl = meta.column_names_to_labels.get(col, '') or ''
+        v_lbls = meta.variable_value_labels.get(col, {}) or {}
+        formatted_lbls = "; ".join(
+            f"{int(k) if isinstance(k, (int, float)) and float(k).is_integer() else k}={v}"
+            for k, v in sorted(v_lbls.items(), key=lambda x: str(x[0]))
+        )
+        raw_rows.append({
+            'Var_Index': idx,
+            'Variable_Name': col,
+            'Question_Label': q_lbl,
+            'Value_Labels': formatted_lbls,
+            'Routing_or_Missing_Rule': infer_routing_rule(col, v_lbls),
+            'NonMissing_Raw_17662': int(df_raw[col].notna().sum()),
+            'NonMissing_EU27_SME_13322': int(df_sme_raw[col].notna().sum()),
+        })
+    raw_vars_df = pd.DataFrame(raw_rows)
+    assert len(raw_vars_df) == 253, f"Expected 253 raw ZA7806 variables, got {len(raw_vars_df)}"
+
+    with pd.ExcelWriter(CODEBOOK_XLSX, engine='openpyxl') as writer:
+        raw_vars_df.to_excel(writer, sheet_name='Raw_ZA7806_253_Vars', index=False)
+        constructed_df.to_excel(writer, sheet_name='Constructed_Variables', index=False)
+        waterfall_df.to_excel(writer, sheet_name='Sample_Waterfall', index=False)
+
+    print(f"  ✓ Auto-generated 253-variable codebook: {CODEBOOK_XLSX}")
+
+
+def save_outputs(df, df_raw, df_sme_raw, meta):
+    """Save SME_Analytical_Final.csv, Input_Data_Consolidated.xlsx, and 253-var Codebook."""
+    print("\n" + "=" * 72)
+    print("PHASE 4: Saving Cleaned Analytical Data, Consolidated Workbook & Codebook")
+    print("=" * 72)
+
     os.makedirs(os.path.dirname(OUTPUT_CSV), exist_ok=True)
-
-    # Save CSV
     df.to_csv(OUTPUT_CSV, index=False)
-    print(f"  ✓ Analytical CSV: {OUTPUT_CSV}")
-    print(f"    Shape: {df.shape}")
+    print(f"  ✓ Analytical CSV: {OUTPUT_CSV} (shape: {df.shape[0]:,} x {df.shape[1]})")
 
-    # ── Multi-sheet Input Excel Workbook ────────────────────────────
+    waterfall_df = build_waterfall_df(df)
+    constructed_df = build_constructed_codebook_df()
+    generate_full_253_codebook(df_raw, df_sme_raw, meta, waterfall_df, constructed_df)
+
     with pd.ExcelWriter(OUTPUT_XLSX, engine='openpyxl') as writer:
-
-        # Sheet 1: Full analytical dataset
         df.to_excel(writer, sheet_name='Analytical_Sample', index=False)
 
-        # Sheet 2: Country-level DESI data
         desi_cols = ['country_iso2', 'DESI_High', 'DESI_VeryHigh', 'DII_composite']
-        desi_sheet = df[desi_cols].drop_duplicates().dropna(subset=['DESI_High'])
-        desi_sheet = desi_sheet.sort_values('country_iso2')
+        desi_sheet = df[desi_cols].drop_duplicates().dropna(subset=['DESI_High']).sort_values('country_iso2')
         desi_sheet.to_excel(writer, sheet_name='DESI_Country_Data', index=False)
 
-        # Sheet 3: Variable codebook
-        codebook_data = {
-            'Variable': ['q9_binary', 'q14_binary', 'DI', 'B2C', 'B2B_private', 'B2G_public',
-                         'grant_receipt', 'advice_public', 'barrier_admin', 'barrier_expertise',
-                         'scr10', 'scr14', 'firm_age', 're_action_count', 're_action_count_9', 'DII_composite'],
-            'Source': ['Q9', 'Q14', 'Q9-Q14', 'scr15.1', 'scr15.2', 'scr15.3',
-                       'Q6.1', 'Q6.4', 'Q7.1', 'Q7.6',
-                       'scr10', 'scr14', 'scr12a', 'Q1', 'Q1.1-Q1.9', 'Eurostat'],
-            'Description': [
-                'Market-facing green offerings (1=Offers green products/services)',
-                'Reported net-zero strategy (1=Yes concrete 2030 strategy or Already neutral)',
-                'Directional Cross-Domain Sustainability Asymmetry Index (Y1 - Y2)',
-                'Sells directly to consumers (B2C)',
-                'Sells to other companies (B2B)',
-                'Sells to public administration (B2G)',
-                'Public financial support (grants, guarantees, loans)',
-                'Public non-financial advice from public administration',
-                'Barrier: complexity of administrative or legal procedures',
-                'Barrier: lack of specific environmental expertise',
-                'Firm size (1=micro, 2=small, 3=medium)',
-                'Annual turnover category',
-                'Years since establishment',
-                'Baseline resource-efficiency action count',
-                'Strict 9-item resource-efficiency action count (Q1.1-Q1.9, 0-9)',
-                'National Digital Intensity Index (DESI High + Very High %)'
-            ],
-            'Type': ['Binary', 'Binary', 'Ternary(-1,0,+1)', 'Binary', 'Binary', 'Binary',
-                     'Binary', 'Binary', 'Binary', 'Binary',
-                     'Ordinal', 'Ordinal', 'Continuous', 'Count', 'Count', 'Continuous'],
-            'Hypothesis': ['Y1(H1a,H1b,H2a,H2b,H3b)', 'Y2(H1a,H1b,H1c,H2a,H2b,H3a,H3b,H3c)', 'DV(Model 4)',
-                          'X(H1a)', 'X(H1c)', 'X(H1b)',
-                          'Treatment(H3a,H3b,H3c)', 'Control', 'X(H2a,H3c)', 'X(H2b)',
-                          'Control', 'Control', 'Control', 'Control', 'Control(Robustness)', 'Moderator(Model 4)']
-        }
-        pd.DataFrame(codebook_data).to_excel(writer, sheet_name='Codebook', index=False)
+        constructed_df.to_excel(writer, sheet_name='Codebook', index=False)
 
-        # Sheet 4: Country metadata
         country_meta = df.groupby('country_iso2').agg(
             N=('uniqid', 'count'),
             Pct_Green_Offerings=('q9_binary', 'mean'),
             Pct_NetZero_Strategy=('q14_binary', 'mean'),
             Mean_DI=('DI', 'mean'),
+            Pct_B2C=('B2C', 'mean'),
             Pct_B2B=('B2B_private', 'mean'),
+            Pct_B2G=('B2G_public', 'mean'),
             Pct_Public_Support=('grant_receipt', 'mean'),
             DII=('DII_composite', 'first')
         ).round(4)
         country_meta.to_excel(writer, sheet_name='Country_Summary')
 
-        # Sheet 5: Descriptive statistics
-        desc_vars = ['q9_binary', 'q14_binary', 'DI', 'B2C', 'B2B_private', 'B2G_public',
-                     'grant_receipt', 'advice_public', 'barrier_admin', 'barrier_expertise',
-                     'scr10', 'scr14', 're_action_count', 're_action_count_9', 'DII_composite']
-        desc_vars = [v for v in desc_vars if v in df.columns]
+        desc_vars = [
+            'q9_binary', 'q14_binary', 'DI', 'B2C', 'B2B_private', 'B2G_public',
+            'grant_receipt', 'advice_public', 'barrier_admin', 'barrier_expertise',
+            'scr10', 'scr14_clean', 'scr14_dk', 're_action_count', 're_action_count_10', 'DII_composite'
+        ]
         desc_stats = df[desc_vars].describe().T
         desc_stats['N_valid'] = df[desc_vars].notna().sum()
         desc_stats['N_missing'] = df[desc_vars].isna().sum()
-        desc_stats['Pct_missing'] = (desc_stats['N_missing'] / len(df) * 100).round(1)
+        desc_stats['Pct_missing'] = (desc_stats['N_missing'] / len(df) * 100).round(2)
         desc_stats.to_excel(writer, sheet_name='Descriptive_Statistics')
 
-        # Sheet 6: Sample Waterfall Reconciliation
-        n_typology = int((df['q9_binary'].notna() & df['q14_binary'].notna()).sum())
-        n_routed = int(df['barrier_admin'].notna().sum())
-        n_ipw = int((df['barrier_admin'].notna() & df['q14_binary'].notna()).sum())
-        n_joint = int((df['barrier_admin'].notna() & df['q9_binary'].notna() & df['q14_binary'].notna()).sum())
-        n_strict = int((df['barrier_admin'].notna() & df['q9_binary'].notna() & df['q14_strict'].notna()).sum())
-        n_cost = int((df['barrier_admin'].notna() & df['q9_binary'].notna() & df['q14_binary'].notna() &
-                      df['q3'].isin([1, 2, 3, 4, 5]) & df['q4'].notna()).sum())
-        n_q53_routed = int((df['q5.3'] == 1.0).sum())
-        n_q53_y2 = int(((df['q5.3'] == 1.0) & df['q14_binary'].notna()).sum())
-        n_q53_joint = int(((df['q5.3'] == 1.0) & df['q9_binary'].notna() & df['q14_binary'].notna()).sum())
-
-        waterfall_df = pd.DataFrame([
-            {'Step': '0. Raw GESIS ZA7806 Dataset', 'Sample_N': 17662,
-             'Filter_Rule': 'All enterprise interviews across 36 countries in Flash Eurobarometer 498'},
-            {'Step': '1. EU-27 Member States', 'Sample_N': 14215,
-             'Filter_Rule': 'Excludes 3,447 non-EU enterprises'},
-            {'Step': '2. Baseline EU-27 SME Population', 'Sample_N': len(df),
-             'Filter_Rule': 'Retains active SMEs with 1-249 employees (scr10 in {1,2,3}); drops 893 large/missing firms'},
-            {'Step': '3. Four-Quadrant Typology & Model 4 Sample', 'Sample_N': n_typology,
-             'Filter_Rule': 'Excludes 1,117 SMEs with DK on Q9 (593) or Q14 (676; 152 missing on both)'},
-            {'Step': '4. Resource-Efficiency Routed Sample (Q3-Q8)', 'Sample_N': n_routed,
-             'Filter_Rule': 'Excludes 1,231 SMEs with zero actions in Q1.1-Q1.9 (re_action_count_9 == 0) that bypassed Q3-Q8'},
-            {'Step': '5. Single-Outcome IPW & CATE Sample (Q14 valid)', 'Sample_N': n_ipw,
-             'Filter_Rule': 'Excludes 570 routed SMEs with DK on Q14 (1,292 treated, 10,229 control)'},
-            {'Step': '6. Primary Joint Econometric Sample (Q9 & Q14 valid)', 'Sample_N': n_joint,
-             'Filter_Rule': 'Excludes 393 routed SMEs with DK on Q9 from 11,521 (1,256 treated, 9,872 control)'},
-            {'Step': '7. Strict 2030 Transition Subsample', 'Sample_N': n_strict,
-             'Filter_Rule': 'Excludes 504 SMEs reporting Already climate neutral (Q14 = 4) from N = 11,128'},
-            {'Step': '8. Operating Cost Ordered Probit Subsample (Model 5)', 'Sample_N': n_cost,
-             'Filter_Rule': 'Routed SMEs in N = 11,128 with valid Q3 (in {1..5}) and Q4'},
-            {'Step': '9a. External Support Seekers Subsample (Q5.3=1, valid Q14)', 'Sample_N': n_q53_y2,
-             'Filter_Rule': f'Subsample of {n_q53_routed:,} Q5.3=1 support-seeking SMEs with valid Q14 (1,292 treated, 1,763 control)'},
-            {'Step': '9b. External Support Seekers Subsample (Q5.3=1, valid Q9 & Q14)', 'Sample_N': n_q53_joint,
-             'Filter_Rule': f'Subsample of {n_q53_routed:,} Q5.3=1 support-seeking SMEs in N=11,128 (1,256 treated, 1,703 control)'},
-        ])
         waterfall_df.to_excel(writer, sheet_name='Sample_Waterfall', index=False)
 
-        # Sheet 7: Table 1 Typology & Within-Survey Construct Validation (N = 12,205)
+        # Table 1 Typology & Within-Survey Construct Validation (N = 12,205)
         d_typ = df.dropna(subset=['q9_binary', 'q14_binary']).copy()
-        d_typ['quad_4'] = np.select(
-            [(d_typ['q9_binary'] == 0) & (d_typ['q14_binary'] == 0),
-             (d_typ['q9_binary'] == 1) & (d_typ['q14_binary'] == 0),
-             (d_typ['q9_binary'] == 0) & (d_typ['q14_binary'] == 1),
-             (d_typ['q9_binary'] == 1) & (d_typ['q14_binary'] == 1)],
-            [0, 1, 2, 3]
-        )
+        d_typ['quad_4'] = d_typ['quadrant'].astype(int)
         t1_rows = []
-        for q_id, q_label in [(0, '0. Disengaged / Neither (0,0)'),
+        for q_id, q_label in [(0, '0. Neither (0,0)'),
                               (1, '1. Green Offerings Only (1,0)'),
                               (2, '2. Net-Zero Strategy Only (0,1)'),
                               (3, '3. Dual Adopters / Both (1,1)'),
@@ -612,8 +608,8 @@ def save_outputs(df):
                 'N': len(sub_q),
                 'Share_Pct': round(100.0 * len(sub_q) / len(d_typ), 2),
                 'Mean_DI': round(float(sub_q['DI'].mean()), 4),
-                'Mean_RE_Actions': round(float(sub_q['re_action_count'].mean()), 2),
-                'Mean_RE_Actions_9Item': round(float(sub_q['re_action_count_9'].mean()), 2),
+                'Mean_RE_Actions_9Item': round(float(sub_q['re_action_count'].mean()), 2),
+                'Mean_RE_Actions_10Item': round(float(sub_q['re_action_count_10'].mean()), 2),
                 'Mean_Firm_Size_1_3': round(float(sub_q['scr10'].mean()), 2),
                 'Public_Support_Pct': round(100.0 * float((sub_q['grant_receipt'] == 1.0).mean()), 2),
                 'Mean_National_DII': round(float(sub_q['DII_composite'].mean()), 2),
@@ -621,12 +617,14 @@ def save_outputs(df):
                 'Green_Jobs_Any_DX5_Pct': round(100.0 * float(sub_q['green_jobs_any'].dropna().mean()), 2),
                 'RE_Invest_GT5Pct_Q4_Valid_Pct': round(100.0 * float((sub_q['q4_clean'].dropna() >= 4).mean()), 2),
                 'Q10_Green_Rev_GT30Pct_Pct': round(100.0 * float((sub_q['q10_clean'].dropna() >= 4).mean()), 2) if sub_q['q10_clean'].notna().any() else np.nan,
+                'Q10_Green_Rev_GT10Pct_Pct': round(100.0 * float((sub_q['q10_clean'].dropna() >= 3).mean()), 2) if sub_q['q10_clean'].notna().any() else np.nan,
                 'Q10_Green_Rev_GT5Pct_Pct': round(100.0 * float((sub_q['q10_clean'].dropna() >= 2).mean()), 2) if sub_q['q10_clean'].notna().any() else np.nan,
-                'Q15_Carbon_Action_Mean': round(float(sub_q['q15_count'].dropna().mean()), 2) if sub_q['q15_count'].notna().any() else np.nan
+                'Q15_Carbon_Action_4Item_Mean': round(float(sub_q['q15_count'].dropna().mean()), 2) if sub_q['q15_count'].notna().any() else np.nan,
+                'Q15_LowCarbon_Tech_Pct': round(100.0 * float(sub_q['q15_tech'].dropna().mean()), 2) if sub_q['q15_tech'].notna().any() else np.nan,
             })
         pd.DataFrame(t1_rows).to_excel(writer, sheet_name='Table1_Typology_12205', index=False)
 
-        # Sheet 8: Table G2 Missing-Data & Routing Attrition Comparison
+        # Missing-Data & Survey-Routing Attrition Comparison
         routed_sub = df[df['barrier_admin'].notna()]
         joint_sub = routed_sub[routed_sub['q9_binary'].notna() & routed_sub['q14_binary'].notna()]
         unrouted_sub = df[df['barrier_admin'].isna()]
@@ -634,7 +632,7 @@ def save_outputs(df):
         attr_rows = []
         for c_name, c_sub in [('Full EU-27 SME Population', df),
                               ('Primary Joint Sample (Routed, Valid Q9 & Q14)', joint_sub),
-                              ('Unrouted Zero-Action SMEs (re_action_count_9 == 0)', unrouted_sub),
+                              ('Unrouted Zero-Action SMEs (re_action_count == 0)', unrouted_sub),
                               ('Routed SMEs Missing Q9 or Q14 (DK)', routed_miss_sub)]:
             attr_rows.append({
                 'Subsample_Cohort': c_name,
@@ -642,47 +640,27 @@ def save_outputs(df):
                 'Micro_1_9_Pct': round(100.0 * float((c_sub['scr10'] == 1).mean()), 2),
                 'Small_10_49_Pct': round(100.0 * float((c_sub['scr10'] == 2).mean()), 2),
                 'Medium_50_249_Pct': round(100.0 * float((c_sub['scr10'] == 3).mean()), 2),
+                'Turnover_DK_Pct': round(100.0 * float(c_sub['scr14_dk'].mean()), 2),
                 'B2C_Pct': round(100.0 * float(c_sub['B2C'].mean()), 2),
                 'B2B_Pct': round(100.0 * float(c_sub['B2B_private'].mean()), 2),
                 'B2G_Pct': round(100.0 * float(c_sub['B2G_public'].mean()), 2),
                 'Green_Offerings_Y1_Valid_Pct': round(100.0 * float(c_sub['q9_binary'].dropna().mean()), 2),
                 'NetZero_Strategy_Y2_Valid_Pct': round(100.0 * float(c_sub['q14_binary'].dropna().mean()), 2),
-                'Mean_9Item_RE_Count': round(float(c_sub['re_action_count_9'].mean()), 2)
+                'Mean_9Item_RE_Count': round(float(c_sub['re_action_count'].mean()), 2)
             })
         pd.DataFrame(attr_rows).to_excel(writer, sheet_name='Missing_Data_Attrition', index=False)
 
-    print(f"  ✓ Input Excel Workbook: {OUTPUT_XLSX}")
-    print(f"    Sheets: Analytical_Sample, DESI_Country_Data, Codebook, Country_Summary, Descriptive_Statistics, Sample_Waterfall, Table1_Typology_12205, Missing_Data_Attrition")
+    print(f"  ✓ Consolidated Input Workbook: {OUTPUT_XLSX}")
 
 
 def main():
-    print("╔" + "═" * 68 + "╗")
-    print("║  SME Institutional Decoupling - Master Data Pipeline             ║")
-    print("║  Corrected: 16 April 2026 (6 critical bug fixes applied)        ║")
-    print("╚" + "═" * 68 + "╝\n")
-
-    # Step 1: Load and filter
-    df, meta = load_and_filter_fl498()
-
-    # Step 2: Recode variables
-    df = recode_variables(df)
-
-    # Step 3: Merge DESI
+    df, df_raw, df_sme_raw, meta = load_and_filter_fl498()
+    df = recode_variables(df, meta)
     df = merge_desi(df)
-
-    # Step 4: Descriptive statistics
-    df = compute_descriptive_stats(df)
-
-    # Step 5: Save outputs
-    save_outputs(df)
-
-    print("\n" + "=" * 70)
-    print("PIPELINE COMPLETE")
-    print("=" * 70)
-    print(f"  Final N: {len(df):,}")
-    print(f"  Variables: {len(df.columns)}")
-    print(f"  Output CSV: {OUTPUT_CSV}")
-    print(f"  Output XLSX: {OUTPUT_XLSX}")
+    save_outputs(df, df_raw, df_sme_raw, meta)
+    print("\n" + "=" * 72)
+    print("01_build_analytical_sample.py COMPLETE")
+    print("=" * 72)
 
 
 if __name__ == '__main__':

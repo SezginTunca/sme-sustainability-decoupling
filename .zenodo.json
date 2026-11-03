@@ -1,6 +1,6 @@
 {
-  "title": "Replication Codebase: Market-Channel Orientation and Capability Constraints Shape Cross-Domain Sustainability Asymmetry in European Small and Medium-Sized Enterprises",
-  "description": "<p>Replication codebase for the empirical study <strong>\"Market-Channel Orientation and Capability Constraints Shape Cross-Domain Sustainability Asymmetry in European Small and Medium-Sized Enterprises\"</strong> (submitted to <em>Business Strategy and the Environment</em>, Wiley).</p><p>Version 2.1.0 provides the fully verified and synchronized econometric replication package: a full-information joint bivariate probit with country and sector fixed effects, RECount, and country-clustered standard errors (discrete sample-average marginal effects, joint-covariance cross-equation tests, Holm adjustment); inverse-propensity weighting (two-stage bootstrap and influence-function variance) and 1:1 propensity-score matching with fixed effects in the propensity model and a logit-scale caliper (Rosenbaum bounds); clustered robustness checks (no RECount, survey weights, routed-only, strict Q14, sector-stratified) with probability-scale moderation; and an automated 31-test econometric verification suite.</p><p><strong>Data access:</strong> microdata come from Flash Eurobarometer 498 (ZA7806, GESIS, DOI 10.4232/1.13934) and Eurostat Digital Intensity indicators (isoc_e_dii). Raw files are public and are not redistributed; place them in <code>Data/Raw/</code> as described in the README.</p>",
+  "title": "Replication Codebase: Green Offerings and Net-Zero Plans: Markets, Capabilities and Finance in European SMEs",
+  "description": "<p>Complete econometric replication codebase for the empirical study <strong>\"Green Offerings and Net-Zero Plans: Markets, Capabilities and Finance in European SMEs\"</strong> (<em>Business Strategy and the Environment</em>, Wiley).</p><p>Version 2.2.0 provides the end-to-end verified replication suite: (1) sample construction, survey routing auditing, and a 253-variable raw-to-cleaned codebook from Flash Eurobarometer 498 (ZA7806) and Eurostat Digital Intensity (isoc_e_dii); (2) joint full-information maximum likelihood (FIML) bivariate probit estimation (N = 11,128; k = 48 per equation; 26 country FE, 3 NACE macro-sector FE, 9 categorical turnover bracket FE, 9-item substantive resource-efficiency action count, 27-country clustered SEs, discrete sample-average marginal effects, cross-equation Wald tests, and 6-test Holm-Bonferroni and t_26 small-cluster p-values); (3) four-quadrant multinomial logit discrete marginal effects; (4) exact Newton-Raphson logistic propensity-score weighting (stabilized IPW with re-estimated propensity bootstrap and 27-country clustered influence-function SEs) and doubly robust AIPW; (5) order-invariant optimal 1:1 bipartite logit-caliper propensity-score matching with exact binomial McNemar and normal-approximation Rosenbaum hidden-bias bounds across 13 matching/weighting specifications; (6) 12-specification consolidated robustness matrix, country-clustered probability-scale moderation, cross-level digital intensity OLS, 5-specification operating-cost ordered probits, construct-intensity validation, Q8 desired-support probits, and 2024 Wave 6 (ZA8869) out-of-sample replication; and (7) an automated 140+ assertion econometric verification suite.</p><p><strong>Data access:</strong> Microdata come from Flash Eurobarometer 498 (ZA7806, GESIS, DOI: 10.4232/1.13934), Flash Eurobarometer 549 (ZA8869, GESIS, DOI: 10.4232/1.14493, optional out-of-sample replication), and Eurostat Digital Intensity indicators (isoc_e_dii). Raw survey files are publicly archived at GESIS/Eurostat and are not redistributed in this code repository; place them in <code>Data/Raw/</code> as documented in <code>README.md</code>.</p>",
   "upload_type": "software",
   "creators": [
     {
@@ -18,18 +18,17 @@
   "license": "MIT",
   "keywords": [
     "small and medium-sized enterprises",
+    "green product offerings",
+    "net-zero decarbonization strategy",
     "market-channel orientation",
     "capability constraints",
+    "public financial support",
     "bivariate probit",
+    "multinomial logit",
     "inverse propensity weighting",
-    "propensity score matching",
-    "environmental policy",
-    "resource efficiency",
-    "green products",
-    "net-zero strategy",
-    "econometrics",
-    "Business Strategy and the Environment",
-    "cross-domain sustainability asymmetry"
+    "optimal bipartite propensity score matching",
+    "Rosenbaum sensitivity bounds",
+    "Business Strategy and the Environment"
   ],
-  "version": "2.1.0"
+  "version": "2.2.0"
 }

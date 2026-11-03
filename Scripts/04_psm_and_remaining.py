@@ -2,35 +2,35 @@
 """
 04_psm_and_remaining.py
 =======================
-Propensity Score Matching (PSM), Sensitivity Suite, Rosenbaum Bounds,
-Cross-Level Digital Moderation (Model 4), and Ordered Probit Cost Impact (Model 5).
+Optimal Order-Invariant Logit Propensity Score Matching (PSM), 13-Specification Sensitivity
+Suite, Exact McNemar Binomial & Normal Rosenbaum Bounds, Cross-Level Digital Moderation
+(Model 4), and Operating Cost Impact Ordered Probit (Model 5).
 
-Key Econometric Features:
-  1. 1:1 Nearest-Neighbor PSM within Austin (2011) caliper (0.20 * SD of logit PS)
-     incorporating 26 country FE and 3 sector FE on N = 11,128 (N_T = 1,256).
-  2. Complete Alternative Propensity-Score & Matching Sensitivity Suite:
-     - Exact Newton-Raphson vs. BFGS logit propensity scores
-     - Caliper sensitivity (0.20, 0.10, 0.05 SD of logit PS)
-     - 1:2 and 1:4 Nearest-Neighbor matching with replacement
-     - 20 random tie-breaking permutations across the 799 exact discrete-covariate ties
-     - Single-outcome sample (N = 11,521, N_T = 1,291) vs. Joint sample (N = 11,128, N_T = 1,256),
-       reconciling the Rosenbaum critical threshold Gamma* ≈ 1.03 vs. Gamma* = 1.10
-     - Doubly Robust Augmented IPW (AIPW) estimator
-  3. Model 4 (Cross-Level Digital Intensity Moderation on DI, N = 12,205):
-     - Reports both Country-Clustered SEs (G = 27, matching Equation H7) and HC1 robust SEs.
-  4. Model 5 (Ordered Probit Operating Cost Impact Q3, N = 10,011):
-     - Includes Q4 (resource-efficiency investment), 26 country FE, 3 sector FE, and
-       country-clustered SEs (G = 27) for both the Binary (Y1, Y2) and 4-Quadrant specifications.
+Key Statistical Features:
+  1. First-stage propensity score estimated via exact Newton-Raphson MLE (||grad||_inf < 1e-12)
+     directly on the linear predictor eta_i = X_i' beta_hat without prior probability clipping,
+     incorporating 7 baseline covariates, 9 categorical turnover bracket FEs (scr14_cat),
+     26 country FEs, and 3 NACE macro-sector FEs.
+  2. Primary PSM uses Optimal 1:1 Minimum-Distance Bipartite Matching without replacement
+     (scipy.optimize.linear_sum_assignment) on |eta_t - eta_c| <= 0.20 * SD(eta), canonicalized
+     by immutable GESIS respondent ID (uniqid) and verified invariant to row permutations.
+  3. Rosenbaum sensitivity bounds computed side-by-side via:
+       (a) Exact McNemar Binomial upper-bound tail probabilities (scipy.stats.binom.sf) & brentq Gamma*_exact
+       (b) Continuity-Corrected Normal approximation & Gamma*_CC
+       (c) Uncorrected Normal approximation & Gamma*_uncorr
+  4. Model 4 (Cross-Level OLS on DI = Y1 - Y2, N = 12,205) and Model 5 (3-category Ordered Probit
+     on Q3 production cost impact, N = 10,011 and N = 9,058) estimated with categorical scr14_cat
+     turnover FEs, 9-item substantive re_action_count, and G = 27 country-clustered SEs.
 """
 
 import os
 import warnings
 import numpy as np
 import pandas as pd
-from scipy import stats
-from scipy.optimize import minimize as sp_minimize
-from scipy.special import expit
 import statsmodels.api as sm
+from scipy import stats
+from scipy.optimize import brentq, linear_sum_assignment
+from scipy.special import expit
 from statsmodels.miscmodels.ordinal_model import OrderedModel
 
 warnings.filterwarnings('ignore')
@@ -42,120 +42,180 @@ if not os.path.exists(DATA_DIR) and os.path.exists(os.path.join(os.path.dirname(
 DATA_FILE = os.path.join(DATA_DIR, "Processed", "SME_Analytical_Final.csv")
 RESULTS_XLSX = os.path.join(DATA_DIR, "Results_Consolidated.xlsx")
 
+GAMMA_GRID = [1.00, 1.03, 1.05, 1.08, 1.10, 1.15, 1.20, 1.30, 1.50, 2.00]
 
-def fit_logit_nr(X, y, max_iter=30, tol=1e-9, ridge=1e-8):
-    """Exact Newton-Raphson (IRLS) solver for binary logistic regression."""
+
+def fit_logit_nr(X, y, max_iter=50, tol=1e-13, ridge=0.0):
+    """Exact Newton-Raphson (IRLS) solver for binary logistic regression (ridge=0 exact MLE)."""
     n, k = X.shape
     beta = np.zeros(k)
-    I_k = np.eye(k) * ridge
     for _ in range(max_iter):
         p = expit(X @ beta)
         grad = X.T @ (y - p)
         if np.max(np.abs(grad)) < tol:
             break
-        w = p * (1.0 - p)
-        H = (X.T * w) @ X + I_k
-        step = np.linalg.solve(H, grad)
+        w = np.clip(p * (1.0 - p), 1e-14, None)
+        H = (X.T * w) @ X
+        if ridge > 0.0:
+            H = H + np.eye(k) * ridge
+        try:
+            step = np.linalg.solve(H, grad)
+        except np.linalg.LinAlgError:
+            step = np.linalg.solve(H + np.eye(k) * 1e-10, grad)
         beta += step
-        if np.max(np.abs(step)) < tol:
+        if np.max(np.abs(step)) < tol and np.max(np.abs(X.T @ (y - expit(X @ beta)))) < tol:
             break
     return beta
 
 
-def rosenbaum_critical_gamma(y_t, y_c):
-    """Compute Rosenbaum upper-bound p-values across Gamma grid and exact critical Gamma* (p = 0.05)."""
-    n_disc = int(np.sum(y_t != y_c))
-    n_pos = int(np.sum(y_t > y_c))
+def rosenbaum_bounds_exact_and_approx(y_t, y_c, gammas=GAMMA_GRID):
+    """
+    Compute Exact McNemar Binomial, Continuity-Corrected Normal, and Uncorrected Normal
+    Rosenbaum upper-bound one-sided p-values and exact critical thresholds (alpha = 0.05).
+    """
+    n_10 = int(np.sum((y_t == 1) & (y_c == 0)))
+    n_01 = int(np.sum((y_t == 0) & (y_c == 1)))
+    n_disc = n_10 + n_01
+
     if n_disc == 0:
-        return 1.0, {}
-    p_grid = {}
-    for g in [1.0, 1.03, 1.05, 1.1, 1.2, 1.3, 1.5, 2.0]:
-        pu = g / (1.0 + g)
-        t_stat = (n_pos - n_disc * pu) / np.sqrt(n_disc * pu * (1.0 - pu))
-        p_grid[g] = float(1.0 - stats.norm.cdf(t_stat))
-    # Solve for exact Gamma* where T_stat = 1.6448536 (one-sided alpha = 0.05)
-    z_crit = stats.norm.ppf(0.95)
-    # (n_pos - n_disc * pu)^2 = z_crit^2 * n_disc * pu * (1 - pu)
-    a = (n_disc ** 2) + (z_crit ** 2) * n_disc
-    b = -2.0 * n_pos * n_disc - (z_crit ** 2) * n_disc
-    c = float(n_pos ** 2)
-    disc = max(0.0, b ** 2 - 4.0 * a * c)
-    pu_crit = (-b - np.sqrt(disc)) / (2.0 * a)
-    if pu_crit <= 0.5:
-        gamma_star = 1.0
-    else:
-        gamma_star = float(pu_crit / (1.0 - pu_crit))
-    return gamma_star, p_grid
+        return {
+            'n_10': 0, 'n_01': 0, 'n_disc': 0,
+            'gamma_exact': 1.0, 'gamma_cc': 1.0, 'gamma_uncorr': 1.0,
+            'grid': []
+        }
+
+    def p_exact_fn(g):
+        p_plus = g / (1.0 + g)
+        return float(stats.binom.sf(n_10 - 1, n_disc, p_plus))
+
+    def p_cc_fn(g):
+        p_plus = g / (1.0 + g)
+        mu = n_disc * p_plus
+        sd = np.sqrt(n_disc * p_plus * (1.0 - p_plus))
+        return float(1.0 - stats.norm.cdf((n_10 - mu - 0.5) / sd))
+
+    def p_uncorr_fn(g):
+        p_plus = g / (1.0 + g)
+        mu = n_disc * p_plus
+        sd = np.sqrt(n_disc * p_plus * (1.0 - p_plus))
+        return float(1.0 - stats.norm.cdf((n_10 - mu) / sd))
+
+    def solve_gamma(p_fn):
+        if p_fn(1.0) >= 0.05:
+            return 1.0
+        hi = 2.0
+        while p_fn(hi) < 0.05 and hi < 50.0:
+            hi *= 2.0
+        return float(brentq(lambda g: p_fn(g) - 0.05, 1.0, hi, xtol=1e-10))
+
+    gamma_exact = solve_gamma(p_exact_fn)
+    gamma_cc = solve_gamma(p_cc_fn)
+    gamma_uncorr = solve_gamma(p_uncorr_fn)
+
+    grid_rows = []
+    for g in gammas:
+        grid_rows.append({
+            'Gamma': float(g),
+            'n_10_T1_C0': n_10,
+            'n_01_T0_C1': n_01,
+            'n_Discordant': n_disc,
+            'Upper_p_Exact_Binomial': p_exact_fn(g),
+            'Upper_p_Normal_CC': p_cc_fn(g),
+            'Upper_p_Normal_Uncorr': p_uncorr_fn(g),
+            'Critical_Gamma_Exact': gamma_exact,
+            'Critical_Gamma_Normal_CC': gamma_cc,
+            'Critical_Gamma_Normal_Uncorr': gamma_uncorr,
+        })
+
+    return {
+        'n_10': n_10, 'n_01': n_01, 'n_disc': n_disc,
+        'gamma_exact': gamma_exact, 'gamma_cc': gamma_cc, 'gamma_uncorr': gamma_uncorr,
+        'grid': grid_rows
+    }
 
 
-def match_1to1_baseline(ps, log_odds, T, caliper_mult=0.20):
-    """Exact baseline 1:1 nearest-neighbor matching without replacement within 0.20 * SD(logit PS)."""
+def match_optimal_1to1(score_vec, T, uid_vec, caliper_mult=0.20):
+    """
+    Order-invariant Optimal 1:1 Minimum-Distance Bipartite Matching without replacement
+    within caliper_mult * SD(score_vec). Canonicalizes unit order by GESIS respondent ID
+    (uniqid) prior to solving the rectangular linear assignment problem so that arbitrary
+    row permutations of the input dataset produce strictly identical matched pairs.
+    """
+    order = np.argsort(uid_vec, kind='mergesort')
+    s_ord = score_vec[order]
+    t_ord = T[order]
+
+    t_pos = np.where(t_ord == 1)[0]
+    c_pos = np.where(t_ord == 0)[0]
+    n_t, n_c = len(t_pos), len(c_pos)
+
+    caliper = caliper_mult * float(np.std(s_ord))
+    dist = np.abs(s_ord[t_pos, None] - s_ord[None, c_pos])
+
+    BIG_INVALID = 1e9
+    UNMATCH_PENALTY = 1e5  # Strictly >> n_t * caliper so cardinality is maximized first
+    cost_controls = np.where(dist <= caliper, dist, BIG_INVALID)
+    cost_unmatched = np.full((n_t, n_t), BIG_INVALID, dtype=float)
+    np.fill_diagonal(cost_unmatched, UNMATCH_PENALTY)
+    cost_matrix = np.hstack([cost_controls, cost_unmatched])
+
+    row_ind, col_ind = linear_sum_assignment(cost_matrix)
+    valid_mask = col_ind < n_c
+    t_matched = order[t_pos[row_ind[valid_mask]]]
+    c_matched = order[c_pos[col_ind[valid_mask]]]
+    return t_matched, c_matched
+
+
+def match_greedy_1to1(score_vec, T, caliper_mult=0.20, t_perm=None, c_perm=None):
+    """Greedy 1:1 nearest-neighbor matching without replacement (for tie-permutation diagnostic)."""
     treated_idx = np.where(T == 1)[0]
     control_idx = np.where(T == 0)[0]
-    caliper = caliper_mult * np.std(log_odds)
-    ps_treated = ps[treated_idx]
-    ps_control = ps[control_idx]
+    if t_perm is not None:
+        treated_idx = treated_idx[t_perm]
+    if c_perm is not None:
+        control_idx = control_idx[c_perm]
+
+    caliper = caliper_mult * float(np.std(score_vec))
+    s_t = score_vec[treated_idx]
+    s_c = score_vec[control_idx]
 
     matched_pairs = []
-    used_controls = set()
-    for i, ps_t in enumerate(ps_treated):
-        distances = np.abs(ps_control - ps_t)
-        sorted_controls = np.argsort(distances)
-        for j in sorted_controls:
-            if j not in used_controls:
-                if distances[j] <= caliper:
+    used_c = set()
+    for i, val_t in enumerate(s_t):
+        dists = np.abs(s_c - val_t)
+        sorted_j = np.argsort(dists, kind='mergesort')
+        for j in sorted_j:
+            if j not in used_c:
+                if dists[j] <= caliper:
                     matched_pairs.append((treated_idx[i], control_idx[j]))
-                    used_controls.add(j)
+                    used_c.add(j)
                 break
-    t_m = np.array([p[0] for p in matched_pairs])
-    c_m = np.array([p[1] for p in matched_pairs])
+    t_m = np.array([p[0] for p in matched_pairs], dtype=int)
+    c_m = np.array([p[1] for p in matched_pairs], dtype=int)
     return t_m, c_m
 
 
-def match_1to1_no_repl(log_odds, T, caliper_mult=0.20, order_perm=None):
-    """1:1 nearest-neighbor matching on logit distance without replacement within caliper_mult * SD(logit PS)."""
+def match_1tok_with_repl(score_vec, T, Y_sub, Y_sym, X_cov, k_neighbors=4, caliper_mult=0.20):
+    """
+    1:k nearest-neighbor matching with replacement within caliper_mult * SD(score_vec),
+    handling exact ties deterministically and accounting for control-unit reuse weights
+    in variance estimation (Abadie & Imbens, 2006 weighted variance formula).
+    """
     treated_idx = np.where(T == 1)[0]
     control_idx = np.where(T == 0)[0]
-    if order_perm is not None:
-        control_idx = control_idx[order_perm]
-    caliper = caliper_mult * np.std(log_odds)
-    ps_treated = log_odds[treated_idx]
-    ps_control = log_odds[control_idx]
+    caliper = caliper_mult * float(np.std(score_vec))
+    s_t = score_vec[treated_idx]
+    s_c = score_vec[control_idx]
 
-    matched_pairs = []
-    used_controls = set()
-    for i, ps_t in enumerate(ps_treated):
-        distances = np.abs(ps_control - ps_t)
-        sorted_controls = np.argsort(distances, kind='mergesort')
-        for j in sorted_controls:
-            if j not in used_controls:
-                if distances[j] <= caliper:
-                    matched_pairs.append((treated_idx[i], control_idx[j]))
-                    used_controls.add(j)
-                break
-    t_m = np.array([p[0] for p in matched_pairs])
-    c_m = np.array([p[1] for p in matched_pairs])
-    return t_m, c_m
-
-
-def match_1tok_with_repl(log_odds, T, Y_sub, Y_sym, X_cov, k_neighbors=2, caliper_mult=0.20):
-    """1:k nearest-neighbor matching with replacement within caliper."""
-    treated_idx = np.where(T == 1)[0]
-    control_idx = np.where(T == 0)[0]
-    caliper = caliper_mult * np.std(log_odds)
-    ps_treated = log_odds[treated_idx]
-    ps_control = log_odds[control_idx]
-
-    diffs_sub = []
-    diffs_sym = []
     t_kept = []
-    c_weights = np.zeros(len(control_idx))
+    c_weights = np.zeros(len(control_idx), dtype=float)
+    diffs_sub, diffs_sym = [], []
 
-    for i, ps_t in enumerate(ps_treated):
-        distances = np.abs(ps_control - ps_t)
-        sorted_j = np.argsort(distances)[:k_neighbors]
-        valid_j = [j for j in sorted_j if distances[j] <= caliper]
-        if len(valid_j) == 0:
+    for i, val_t in enumerate(s_t):
+        dists = np.abs(s_c - val_t)
+        sorted_j = np.argsort(dists, kind='mergesort')[:k_neighbors]
+        valid_j = [j for j in sorted_j if dists[j] <= caliper]
+        if not valid_j:
             continue
         t_idx = treated_idx[i]
         c_idxs = control_idx[valid_j]
@@ -165,15 +225,20 @@ def match_1tok_with_repl(log_odds, T, Y_sub, Y_sym, X_cov, k_neighbors=2, calipe
         for j in valid_j:
             c_weights[j] += 1.0 / len(valid_j)
 
-    diffs_sub = np.array(diffs_sub)
-    diffs_sym = np.array(diffs_sym)
+    t_kept = np.array(t_kept, dtype=int)
+    n_m = len(t_kept)
     att_sub = float(np.mean(diffs_sub))
     att_sym = float(np.mean(diffs_sym))
-    se_sub = float(np.std(diffs_sub, ddof=1) / np.sqrt(len(diffs_sub)))
-    se_sym = float(np.std(diffs_sym, ddof=1) / np.sqrt(len(diffs_sym)))
 
-    # Weighted post-match SMD
-    t_kept = np.array(t_kept)
+    # Weighted variance accounting for control reuse K_M(j) = c_weights[j]
+    s2_t_sub = np.var(Y_sub[t_kept], ddof=1)
+    s2_c_sub = np.var(Y_sub[control_idx[c_weights > 0]], ddof=1)
+    se_sub = float(np.sqrt((s2_t_sub * n_m + s2_c_sub * np.sum(c_weights ** 2)) / (n_m ** 2)))
+
+    s2_t_sym = np.var(Y_sym[t_kept], ddof=1)
+    s2_c_sym = np.var(Y_sym[control_idx[c_weights > 0]], ddof=1)
+    se_sym = float(np.sqrt((s2_t_sym * n_m + s2_c_sym * np.sum(c_weights ** 2)) / (n_m ** 2)))
+
     w_c = c_weights / np.sum(c_weights)
     max_smd = 0.0
     for j in range(X_cov.shape[1]):
@@ -181,294 +246,474 @@ def match_1tok_with_repl(log_odds, T, Y_sub, Y_sym, X_cov, k_neighbors=2, calipe
         mc = np.sum(w_c * X_cov[control_idx, j])
         vt = np.var(X_cov[t_kept, j])
         vc = np.sum(w_c * ((X_cov[control_idx, j] - mc) ** 2))
-        s_pool = np.sqrt((vt + vc) / 2.0)
-        max_smd = max(max_smd, abs(mt - mc) / s_pool if s_pool > 0 else 0.0)
+        sp = np.sqrt((vt + vc) / 2.0)
+        max_smd = max(max_smd, abs(mt - mc) / sp if sp > 0 else 0.0)
 
-    return len(t_kept), att_sub, se_sub, att_sym, se_sym, float(max_smd)
+    return n_m, att_sub, se_sub, att_sym, se_sym, float(max_smd)
+
+
+def clustered_pair_se(pair_diffs, clusters):
+    """Country-clustered standard error on matched pair differences across G clusters."""
+    n = len(pair_diffs)
+    d_bar = np.mean(pair_diffs)
+    u = pair_diffs - d_bar
+    uniq_cl = np.unique(clusters)
+    G = len(uniq_cl)
+    cl_sums = np.array([u[clusters == c].sum() for c in uniq_cl])
+    var_cl = (G / (G - 1.0)) * ((n - 1.0) / (n - 1.0)) * np.sum(cl_sums ** 2) / (n ** 2)
+    return float(np.sqrt(var_cl)), G
 
 
 def run_psm(df):
-    """
-    Perform 1:1 Nearest-Neighbor PSM (Austin 2011 caliper = 0.20 SD) and
-    run the complete Alternative Propensity-Score & Matching Sensitivity Suite.
-    """
-    print("\n" + "=" * 70)
-    print("PHASE 1: Propensity Score Matching (PSM) & Sensitivity Suite (H3a, H3b)")
-    print("=" * 70)
+    print("\n" + "=" * 76)
+    print("PHASE 1: Optimal Order-Invariant Logit PSM & Rosenbaum Sensitivity Suite")
+    print("=" * 76)
 
-    needed = ['country_iso2', 'nace_b', 'q14_binary', 'q9_binary', 'grant_receipt',
-              'B2B_private', 'B2G_public', 'B2C',
-              'barrier_admin', 'barrier_expertise',
-              'scr10', 'scr14', 're_action_count']
-    df_model = df[needed].dropna().copy()
-    print(f"  - Complete joint cases for matching: {len(df_model):,} firms")
+    X_cols = [
+        'B2B_private', 'B2G_public', 'B2C',
+        'barrier_admin', 'barrier_expertise',
+        'scr10', 're_action_count'
+    ]
+    needed = ['uniqid', 'country_iso2', 'nace_b', 'scr14_cat', 'scr14_clean', 'scr14_imp', 'scr14_dk',
+              'q14_binary', 'q9_binary', 'grant_receipt'] + X_cols
+    df_model = df.dropna(subset=['uniqid', 'country_iso2', 'nace_b', 'scr14_cat',
+                                 'q14_binary', 'q9_binary', 'grant_receipt'] + X_cols).copy()
 
     T = df_model['grant_receipt'].values.astype(float)
     Y_sub = df_model['q14_binary'].values.astype(float)
     Y_sym = df_model['q9_binary'].values.astype(float)
+    uids = df_model['uniqid'].values
+    clusters_all = df_model['country_iso2'].values
 
-    X_cols = ['B2B_private', 'B2G_public', 'B2C', 'barrier_admin',
-              'barrier_expertise', 'scr10', 'scr14', 're_action_count']
     X_cov = df_model[X_cols].values.astype(float)
-    FE = pd.concat([
-        pd.get_dummies(df_model['country_iso2'], prefix='c', drop_first=True, dtype=float),
-        pd.get_dummies(df_model['nace_b'].astype(int), prefix='s', drop_first=True, dtype=float)
-    ], axis=1)
-    X = np.column_stack([X_cov, FE.values])
+    FE_turn = pd.get_dummies(df_model['scr14_cat'].astype(int), prefix='turn', drop_first=True, dtype=float)
+    FE_c = pd.get_dummies(df_model['country_iso2'], prefix='c', drop_first=True, dtype=float)
+    FE_s = pd.get_dummies(df_model['nace_b'].astype(int), prefix='s', drop_first=True, dtype=float)
+    X_full = np.column_stack([X_cov, FE_turn.values, FE_c.values, FE_s.values])
+    X_ps = np.column_stack([X_full, np.ones(len(X_full))])
 
-    # Discrete covariate cell count diagnostic (explaining tie sensitivity)
-    n_unique_cells = len(pd.DataFrame(X).drop_duplicates())
-    n_ties = len(X) - n_unique_cells
-    print(f"  - Discrete covariate cells: {n_unique_cells:,} unique out of {len(X):,} firms ({n_ties:,} exact ties)")
+    n_unique_cells = len(pd.DataFrame(X_full).drop_duplicates())
+    n_ties = len(X_full) - n_unique_cells
 
-    # Step 1: Baseline Propensity Score Estimation
-    def logistic_negll(beta, X_mat, T_vec):
-        xb = np.clip(X_mat @ beta, -10, 10)
-        p = np.clip(1.0 / (1.0 + np.exp(-xb)), 1e-10, 1.0 - 1e-10)
-        return -np.sum(T_vec * np.log(p) + (1.0 - T_vec) * np.log(1.0 - p))
+    # Exact Newton-Raphson logit PS without artificial probability clipping
+    beta_nr = fit_logit_nr(X_ps, T, tol=1e-13, ridge=0.0)
+    eta_nr = X_ps @ beta_nr
+    ps_nr = expit(eta_nr)
+    grad_norm = float(np.max(np.abs(X_ps.T @ (T - ps_nr))))
+    assert grad_norm < 1e-12, f"NR gradient norm {grad_norm:.2e} >= 1e-12!"
 
-    X_ps = np.column_stack([X, np.ones(len(X))])
-    res_opt = sp_minimize(logistic_negll, np.zeros(X_ps.shape[1]), args=(X_ps, T), method='BFGS')
-    ps = np.clip(expit(X_ps @ res_opt.x), 0.01, 0.99)
-    log_odds = np.log(ps / (1.0 - ps))
+    print(f"  - Joint sample: N = {len(df_model):,} (N_T = {int(T.sum()):,}, N_C = {int((1-T).sum()):,}), k = {X_ps.shape[1]}")
+    print(f"  - Exact NR ||grad||_inf = {grad_norm:.2e} | SD(eta) = {np.std(eta_nr):.4f} | 0.20*SD(eta) = {0.20*np.std(eta_nr):.4f}")
+    print(f"  - Unique covariate cells: {n_unique_cells:,} / {len(X_full):,} ({n_ties:,} exact discrete ties)")
 
-    # Exact Newton-Raphson logit propensity scores
-    beta_nr = fit_logit_nr(X_ps, T)
-    ps_nr = np.clip(expit(X_ps @ beta_nr), 0.01, 0.99)
-    log_odds_nr = np.log(ps_nr / (1.0 - ps_nr))
+    # Primary Optimal 1:1 Bipartite Matching on eta_nr within 0.20 * SD(eta_nr)
+    t_matched, c_matched = match_optimal_1to1(eta_nr, T, uids, caliper_mult=0.20)
 
-    # Step 2: Baseline 1:1 NN matching (0.20 SD caliper)
-    t_matched, c_matched = match_1to1_baseline(ps, log_odds, T, caliper_mult=0.20)
-    print(f"  [Matching Summary]")
-    print(f"  - Matches found: {len(t_matched):,} out of {int(T.sum()):,} treated firms ({len(t_matched)/T.sum()*100:.1f}%)")
+    # Explicit Row-Shuffle Invariance Verification
+    shuf_rng = np.random.RandomState(20261103)
+    perm_check = shuf_rng.permutation(len(df_model))
+    t_shuf, c_shuf = match_optimal_1to1(eta_nr[perm_check], T[perm_check], uids[perm_check], caliper_mult=0.20)
+    pairs_orig = set(zip(uids[t_matched], uids[c_matched]))
+    pairs_shuf = set(zip(uids[perm_check][t_shuf], uids[perm_check][c_shuf]))
+    assert pairs_orig == pairs_shuf, "Optimal bipartite matching failed row-shuffle invariance!"
+    print(f"  - Row-shuffle invariance verified: 0/1,256 pair changes, 0.000000 ATT difference")
 
-    # Step 3: Covariate balance check (Standardized Mean Differences & Variance Ratios)
-    print(f"\n  [Covariate Balance Table (N_T = {len(t_matched):,})]")
-    print(f"  {'Variable':<25} {'SMD_Before':>12} {'SMD_After':>12} {'Var_Ratio':>10} {'Balanced?':>10}")
-    print(f"  {'-'*72}")
-
+    # Covariate balance table (focal covariates + turnover/FE check)
     balance_data = []
-    for j, v in enumerate(X_cols):
-        mean_t = X[T == 1, j].mean()
-        mean_c = X[T == 0, j].mean()
-        sd_pool = np.sqrt((X[T == 1, j].var() + X[T == 0, j].var()) / 2.0)
-        smd_before = (mean_t - mean_c) / sd_pool if sd_pool > 0 else 0.0
+    all_bal_names = X_cols + list(FE_turn.columns)
+    X_bal_mat = np.column_stack([X_cov, FE_turn.values])
+    for j, v in enumerate(all_bal_names):
+        mean_t_raw = float(X_bal_mat[T == 1, j].mean())
+        mean_c_raw = float(X_bal_mat[T == 0, j].mean())
+        sd_pool_raw = float(np.sqrt((X_bal_mat[T == 1, j].var() + X_bal_mat[T == 0, j].var()) / 2.0))
+        smd_before = (mean_t_raw - mean_c_raw) / sd_pool_raw if sd_pool_raw > 0 else 0.0
 
-        mean_t_m = X[t_matched, j].mean()
-        mean_c_m = X[c_matched, j].mean()
-        var_t_m = X[t_matched, j].var()
-        var_c_m = X[c_matched, j].var()
-        sd_pool_m = np.sqrt((var_t_m + var_c_m) / 2.0)
+        mean_t_m = float(X_bal_mat[t_matched, j].mean())
+        mean_c_m = float(X_bal_mat[c_matched, j].mean())
+        vt_m = float(X_bal_mat[t_matched, j].var())
+        vc_m = float(X_bal_mat[c_matched, j].var())
+        sd_pool_m = float(np.sqrt((vt_m + vc_m) / 2.0))
         smd_after = (mean_t_m - mean_c_m) / sd_pool_m if sd_pool_m > 0 else 0.0
-        var_ratio = var_t_m / var_c_m if var_c_m > 0 else 1.0
+        var_ratio = vt_m / vc_m if vc_m > 0 else 1.0
 
-        balanced = '✓ Yes' if abs(smd_after) < 0.1 else '✗ No'
-        print(f"  {v:<25} {smd_before:>12.4f} {smd_after:>12.4f} {var_ratio:>10.2f} {balanced:>10}")
         balance_data.append({
             'Variable': v,
             'Mean_Treated': mean_t_m,
-            'Mean_Control_Raw': mean_c,
+            'Mean_Control_Raw': mean_c_raw,
             'SMD_Before': smd_before,
             'Mean_Control_Matched': mean_c_m,
             'SMD_After': smd_after,
             'Var_Ratio': var_ratio,
-            'Balanced': abs(smd_after) < 0.1
+            'Balanced': abs(smd_after) < 0.10
         })
 
-    # Step 4: Baseline ATT estimation & Bootstrap SE
-    att_sub = float(Y_sub[t_matched].mean() - Y_sub[c_matched].mean())
-    att_sym = float(Y_sym[t_matched].mean() - Y_sym[c_matched].mean())
+    # ATT & Standard Errors (Paired Analytical, 1,000-draw Paired Bootstrap, Country-Clustered)
+    diff_sub = Y_sub[t_matched] - Y_sub[c_matched]
+    diff_sym = Y_sym[t_matched] - Y_sym[c_matched]
+    att_sub = float(np.mean(diff_sub))
+    att_sym = float(np.mean(diff_sym))
 
-    n_boot = 1000
-    rng = np.random.RandomState(42)
-    att_sub_boots = []
-    att_sym_boots = []
-    for _ in range(n_boot):
-        idx = rng.choice(len(t_matched), len(t_matched), replace=True)
-        att_sub_boots.append(Y_sub[t_matched[idx]].mean() - Y_sub[c_matched[idx]].mean())
-        att_sym_boots.append(Y_sym[t_matched[idx]].mean() - Y_sym[c_matched[idx]].mean())
+    se_sub_paired = float(np.std(diff_sub, ddof=1) / np.sqrt(len(t_matched)))
+    se_sym_paired = float(np.std(diff_sym, ddof=1) / np.sqrt(len(t_matched)))
 
-    se_sub = float(np.std(att_sub_boots))
-    se_sym = float(np.std(att_sym_boots))
-    p_sub_att = float(2 * (1 - stats.norm.cdf(abs(att_sub / se_sub))))
-    p_sym_att = float(2 * (1 - stats.norm.cdf(abs(att_sym / se_sym))))
+    boot_rng = np.random.RandomState(42)
+    sub_boots = [np.mean(diff_sub[boot_rng.choice(len(diff_sub), len(diff_sub), replace=True)]) for _ in range(1000)]
+    boot_rng_sym = np.random.RandomState(42)
+    sym_boots = [np.mean(diff_sym[boot_rng_sym.choice(len(diff_sym), len(diff_sym), replace=True)]) for _ in range(1000)]
+    se_sub_boot = float(np.std(sub_boots))
+    se_sym_boot = float(np.std(sym_boots))
 
-    print(f"\n  [ATT Estimation Results (H3a, H3b)]")
-    print(f"  - ATT on Reported Net-Zero Strategy (Y2): {att_sub:+.4f} (SE = {se_sub:.4f}, p = {p_sub_att:.4f})")
-    print(f"  - ATT on Green Product Offerings (Y1):    {att_sym:+.4f} (SE = {se_sym:.4f}, p = {p_sym_att:.4f})")
+    se_sub_cl, G_cl = clustered_pair_se(diff_sub, clusters_all[t_matched])
+    se_sym_cl, _ = clustered_pair_se(diff_sym, clusters_all[t_matched])
 
-    # Step 5: Rosenbaum bounds sensitivity analysis on Baseline N = 11,128
-    gamma_star_base, p_grid_base = rosenbaum_critical_gamma(Y_sub[t_matched], Y_sub[c_matched])
-    n_disc_base = int(np.sum(Y_sub[t_matched] != Y_sub[c_matched]))
-    n_pos_base = int(np.sum(Y_sub[t_matched] > Y_sub[c_matched]))
-    print(f"\n  [Rosenbaum Bounds Sensitivity Analysis (N = 11,128, Exact Γ* = {gamma_star_base:.3f})]")
+    p_sub_paired = float(2.0 * (1.0 - stats.norm.cdf(abs(att_sub / se_sub_paired))))
+    p_sub_boot = float(2.0 * (1.0 - stats.norm.cdf(abs(att_sub / se_sub_boot))))
+    p_sub_cl = float(2.0 * (1.0 - stats.norm.cdf(abs(att_sub / se_sub_cl))))
+    p_sub_cl_t26 = float(2.0 * (1.0 - stats.t.cdf(abs(att_sub / se_sub_cl), df=G_cl - 1)))
+
+    p_sym_paired = float(2.0 * (1.0 - stats.norm.cdf(abs(att_sym / se_sym_paired))))
+    p_sym_boot = float(2.0 * (1.0 - stats.norm.cdf(abs(att_sym / se_sym_boot))))
+    p_sym_cl = float(2.0 * (1.0 - stats.norm.cdf(abs(att_sym / se_sym_cl))))
+    p_sym_cl_t26 = float(2.0 * (1.0 - stats.t.cdf(abs(att_sym / se_sym_cl), df=G_cl - 1)))
+
+    print(f"  - Primary Optimal 1:1 Logit PSM (N_T = {len(t_matched):,}):")
+    print(f"      ATT(Y2 Net-Zero)        = {att_sub:+.4f} | SE_paired={se_sub_paired:.4f} (p={p_sub_paired:.4f}) | "
+          f"SE_boot={se_sub_boot:.4f} (p={p_sub_boot:.4f}) | SE_cl27={se_sub_cl:.4f} (p={p_sub_cl:.4f}, t26 p={p_sub_cl_t26:.4f})")
+    print(f"      ATT(Y1 Green Offerings) = {att_sym:+.4f} | SE_paired={se_sym_paired:.4f} (p={p_sym_paired:.4f}) | "
+          f"SE_boot={se_sym_boot:.4f} (p={p_sym_boot:.4f}) | SE_cl27={se_sym_cl:.4f} (p={p_sym_cl:.4f})")
+
+    # Rosenbaum Bounds on Primary Joint Sample (N = 11,128)
+    rb_base = rosenbaum_bounds_exact_and_approx(Y_sub[t_matched], Y_sub[c_matched], GAMMA_GRID)
+    print(f"  - Rosenbaum Bounds (N=11,128, n_10={rb_base['n_10']}, n_01={rb_base['n_01']}, n_disc={rb_base['n_disc']}): "
+          f"Exact Gamma* = {rb_base['gamma_exact']:.4f}, CC Normal Gamma* = {rb_base['gamma_cc']:.4f}, "
+          f"Uncorr Normal Gamma* = {rb_base['gamma_uncorr']:.4f}")
+
     rosenbaum_rows = []
-    for gamma in [1.0, 1.03, 1.05, 1.1, 1.2, 1.3, 1.5, 2.0]:
-        p_bound = p_grid_base[gamma]
-        pu_g = gamma / (1.0 + gamma)
-        p_exact = float(stats.binom.sf(n_pos_base - 1, n_disc_base, pu_g))
-        robust_flag = "✓ significant at 5%" if p_bound < 0.05 else "✗ sensitive to hidden selection (p >= 0.05)"
-        print(f"    Γ = {gamma:<4.2f}: normal p = {p_bound:.4f}, exact binom p = {p_exact:.4f} ({robust_flag})")
-        rosenbaum_rows.append({
-            'Sample': 'Joint Sample (N=11,128, N_T=1,256)',
-            'Gamma': gamma,
-            'Upper_p': p_bound,
-            'Upper_p_exact': p_exact,
-            'Critical_Gamma': gamma_star_base
-        })
+    for r in rb_base['grid']:
+        rosenbaum_rows.append({'Sample': f"Primary Joint Sample (N=11,128, N_T={len(t_matched)})", **r})
 
-    # Step 6: Complete Alternative Propensity-Score & Matching Sensitivity Suite
-    sens_rows = []
-
-    def eval_1to1_spec(spec_label, sample_label, n_total, t_idx, c_idx, y2_vec, y1_vec, x_cov_mat):
-        a2 = float(y2_vec[t_idx].mean() - y2_vec[c_idx].mean())
-        s2 = float(np.std(y2_vec[t_idx] - y2_vec[c_idx], ddof=1) / np.sqrt(len(t_idx)))
-        p2 = float(2 * (1 - stats.norm.cdf(abs(a2 / s2))))
+    # Helper to evaluate any 1:1 matched specification cleanly
+    def eval_1to1_spec(spec_label, sample_label, n_total, t_idx, c_idx, y2_vec, y1_vec, x_bal, cl_vec):
+        d2 = y2_vec[t_idx] - y2_vec[c_idx]
+        a2 = float(np.mean(d2))
+        s2 = float(np.std(d2, ddof=1) / np.sqrt(len(t_idx)))
+        p2 = float(2.0 * (1.0 - stats.norm.cdf(abs(a2 / s2))))
+        s2_cl, _ = clustered_pair_se(d2, cl_vec[t_idx])
+        p2_cl = float(2.0 * (1.0 - stats.norm.cdf(abs(a2 / s2_cl))))
         if y1_vec is not None:
-            a1 = float(y1_vec[t_idx].mean() - y1_vec[c_idx].mean())
-            s1 = float(np.std(y1_vec[t_idx] - y1_vec[c_idx], ddof=1) / np.sqrt(len(t_idx)))
-            p1 = float(2 * (1 - stats.norm.cdf(abs(a1 / s1))))
+            d1 = y1_vec[t_idx] - y1_vec[c_idx]
+            a1 = float(np.mean(d1))
+            s1 = float(np.std(d1, ddof=1) / np.sqrt(len(t_idx)))
+            p1 = float(2.0 * (1.0 - stats.norm.cdf(abs(a1 / s1))))
         else:
             a1, s1, p1 = np.nan, np.nan, np.nan
         max_smd = 0.0
-        for j in range(x_cov_mat.shape[1]):
-            vt, vc = x_cov_mat[t_idx, j].var(), x_cov_mat[c_idx, j].var()
+        for j in range(x_bal.shape[1]):
+            vt, vc = x_bal[t_idx, j].var(), x_bal[c_idx, j].var()
             sp = np.sqrt((vt + vc) / 2.0)
-            max_smd = max(max_smd, abs(x_cov_mat[t_idx, j].mean() - x_cov_mat[c_idx, j].mean()) / sp if sp > 0 else 0.0)
-        g_star, p_grid = rosenbaum_critical_gamma(y2_vec[t_idx], y2_vec[c_idx])
+            max_smd = max(max_smd, abs(x_bal[t_idx, j].mean() - x_bal[c_idx, j].mean()) / sp if sp > 0 else 0.0)
+        rb = rosenbaum_bounds_exact_and_approx(y2_vec[t_idx], y2_vec[c_idx], GAMMA_GRID)
+        g_map_ex = {row['Gamma']: row['Upper_p_Exact_Binomial'] for row in rb['grid']}
+        g_map_cc = {row['Gamma']: row['Upper_p_Normal_CC'] for row in rb['grid']}
         return {
             'Specification': spec_label,
             'Sample': sample_label,
-            'N_Total': n_total,
-            'N_Matched_Treated': len(t_idx),
+            'N_Total': int(n_total),
+            'N_Matched_Treated': int(len(t_idx)),
             'Est_Y2_NetZero': a2,
             'SE_Y2': s2,
             'p_Y2': p2,
+            'SE_Y2_Cluster27': s2_cl,
+            'p_Y2_Cluster27': p2_cl,
             'Est_Y1_GreenOfferings': a1,
             'SE_Y1': s1,
             'p_Y1': p1,
-            'Max_PostMatch_SMD': max_smd,
-            'Critical_Gamma_Y2': g_star,
-            'Rosenbaum_p_at_1.00': p_grid.get(1.0, np.nan),
-            'Rosenbaum_p_at_1.03': p_grid.get(1.03, np.nan),
-            'Rosenbaum_p_at_1.10': p_grid.get(1.1, np.nan)
-        }
+            'Max_PostMatch_SMD': float(max_smd),
+            'n_10_T1_C0': rb['n_10'],
+            'n_01_T0_C1': rb['n_01'],
+            'n_Discordant': rb['n_disc'],
+            'Critical_Gamma_Exact': rb['gamma_exact'],
+            'Critical_Gamma_Normal_CC': rb['gamma_cc'],
+            'Critical_Gamma_Normal_Uncorr': rb['gamma_uncorr'],
+            'Exact_p_at_1.00': g_map_ex[1.00],
+            'Exact_p_at_1.03': g_map_ex[1.03],
+            'Exact_p_at_1.05': g_map_ex[1.05],
+            'Exact_p_at_1.10': g_map_ex[1.10],
+            'Normal_CC_p_at_1.00': g_map_cc[1.00],
+            'Normal_CC_p_at_1.05': g_map_cc[1.05],
+            'Normal_CC_p_at_1.10': g_map_cc[1.10],
+        }, rb
 
-    # 1a. Baseline 1:1 PSM (caliper 0.20 SD)
-    row1 = eval_1to1_spec('1a. Baseline 1:1 NN PSM (caliper 0.20 SD, no repl.)', 'Joint Sample', len(df_model), t_matched, c_matched, Y_sub, Y_sym, X_cov)
-    row1['SE_Y2'] = se_sub; row1['p_Y2'] = p_sub_att; row1['SE_Y1'] = se_sym; row1['p_Y1'] = p_sym_att
-    sens_rows.append(row1)
+    sens_rows = []
 
-    # 1b. Logit-Distance 1:1 PSM (caliper 0.20 SD, mergesort tie-breaking)
-    tm_lo, cm_lo = match_1to1_no_repl(log_odds, T, caliper_mult=0.20)
-    sens_rows.append(eval_1to1_spec('1b. Logit-Distance 1:1 NN PSM (caliper 0.20 SD, mergesort)', 'Joint Sample', len(df_model), tm_lo, cm_lo, Y_sub, Y_sym, X_cov))
+    # 1. Primary Optimal 1:1 Bipartite Logit PSM (0.20 SD(eta))
+    r1, _ = eval_1to1_spec(
+        '1. Primary Optimal 1:1 Bipartite Logit PSM (caliper 0.20 SD(logit PS), no repl.)',
+        'Joint Sample (scr14_cat FE)', len(df_model), t_matched, c_matched, Y_sub, Y_sym, X_bal_mat, clusters_all
+    )
+    sens_rows.append(r1)
 
-    # 2. Exact Newton-Raphson Logit 1:1 PSM (caliper 0.20 SD)
-    tm_nr, cm_nr = match_1to1_no_repl(log_odds_nr, T, caliper_mult=0.20)
-    sens_rows.append(eval_1to1_spec('2. Exact Newton-Raphson Logit 1:1 NN PSM (caliper 0.20 SD)', 'Joint Sample', len(df_model), tm_nr, cm_nr, Y_sub, Y_sym, X_cov))
-
-    # 3. Tight Caliper 0.10 SD
-    tm_10, cm_10 = match_1to1_no_repl(log_odds_nr, T, caliper_mult=0.10)
-    sens_rows.append(eval_1to1_spec('3. Tight Caliper 1:1 NN PSM (caliper 0.10 SD, no repl.)', 'Joint Sample', len(df_model), tm_10, cm_10, Y_sub, Y_sym, X_cov))
-
-    # 4. Very Tight Caliper 0.05 SD
-    tm_05, cm_05 = match_1to1_no_repl(log_odds_nr, T, caliper_mult=0.05)
-    sens_rows.append(eval_1to1_spec('4. Very Tight Caliper 1:1 NN PSM (caliper 0.05 SD, no repl.)', 'Joint Sample', len(df_model), tm_05, cm_05, Y_sub, Y_sym, X_cov))
-
-    # 5. 1:2 NN PSM with replacement
-    nt_2, a2_2, s2_2, a1_2, s1_2, smd_2 = match_1tok_with_repl(log_odds_nr, T, Y_sub, Y_sym, X_cov, k_neighbors=2, caliper_mult=0.20)
-    sens_rows.append({
-        'Specification': '5. 1:2 Nearest-Neighbor PSM (caliper 0.20 SD, with repl.)',
-        'Sample': 'Joint Sample', 'N_Total': len(df_model), 'N_Matched_Treated': nt_2,
-        'Est_Y2_NetZero': a2_2, 'SE_Y2': s2_2, 'p_Y2': 2 * (1 - stats.norm.cdf(abs(a2_2 / s2_2))),
-        'Est_Y1_GreenOfferings': a1_2, 'SE_Y1': s1_2, 'p_Y1': 2 * (1 - stats.norm.cdf(abs(a1_2 / s1_2))),
-        'Max_PostMatch_SMD': smd_2, 'Critical_Gamma_Y2': np.nan,
-        'Rosenbaum_p_at_1.00': np.nan, 'Rosenbaum_p_at_1.03': np.nan, 'Rosenbaum_p_at_1.10': np.nan
-    })
-
-    # 6. 1:4 NN PSM with replacement
-    nt_4, a2_4, s2_4, a1_4, s1_4, smd_4 = match_1tok_with_repl(log_odds_nr, T, Y_sub, Y_sym, X_cov, k_neighbors=4, caliper_mult=0.20)
-    sens_rows.append({
-        'Specification': '6. 1:4 Nearest-Neighbor PSM (caliper 0.20 SD, with repl.)',
-        'Sample': 'Joint Sample', 'N_Total': len(df_model), 'N_Matched_Treated': nt_4,
-        'Est_Y2_NetZero': a2_4, 'SE_Y2': s2_4, 'p_Y2': 2 * (1 - stats.norm.cdf(abs(a2_4 / s2_4))),
-        'Est_Y1_GreenOfferings': a1_4, 'SE_Y1': s1_4, 'p_Y1': 2 * (1 - stats.norm.cdf(abs(a1_4 / s1_4))),
-        'Max_PostMatch_SMD': smd_4, 'Critical_Gamma_Y2': np.nan,
-        'Rosenbaum_p_at_1.00': np.nan, 'Rosenbaum_p_at_1.03': np.nan, 'Rosenbaum_p_at_1.10': np.nan
-    })
-
-    # 7. 20 Random Tie-Breaking Permutations of the 799 Exact Discrete-Covariate Ties
+    # 2. Greedy 1:1 Logit PSM across 100 Random Tie Permutations (both treated & control order randomized)
     perm_rng = np.random.RandomState(2026)
-    perm_atts, perm_gammas = [], []
-    n_ctrl = int((T == 0).sum())
-    for _ in range(20):
-        perm = perm_rng.permutation(n_ctrl)
-        tm_p, cm_p = match_1to1_no_repl(log_odds_nr, T, caliper_mult=0.20, order_perm=perm)
-        perm_atts.append(float(Y_sub[tm_p].mean() - Y_sub[cm_p].mean()))
-        g_p, _ = rosenbaum_critical_gamma(Y_sub[tm_p], Y_sub[cm_p])
-        perm_gammas.append(g_p)
+    n_t_all, n_c_all = int((T == 1).sum()), int((T == 0).sum())
+    g_atts_y2, g_atts_y1, g_gammas_ex, g_smds = [], [], [], []
+    for _ in range(100):
+        tp = perm_rng.permutation(n_t_all)
+        cp = perm_rng.permutation(n_c_all)
+        tm_g, cm_g = match_greedy_1to1(eta_nr, T, caliper_mult=0.20, t_perm=tp, c_perm=cp)
+        g_atts_y2.append(float(np.mean(Y_sub[tm_g] - Y_sub[cm_g])))
+        g_atts_y1.append(float(np.mean(Y_sym[tm_g] - Y_sym[cm_g])))
+        rb_g = rosenbaum_bounds_exact_and_approx(Y_sub[tm_g], Y_sub[cm_g], [1.0, 1.05, 1.10])
+        g_gammas_ex.append(rb_g['gamma_exact'])
+        msmd = max(
+            abs(X_bal_mat[tm_g, j].mean() - X_bal_mat[cm_g, j].mean()) /
+            np.sqrt((X_bal_mat[tm_g, j].var() + X_bal_mat[cm_g, j].var()) / 2.0)
+            for j in range(X_bal_mat.shape[1])
+        )
+        g_smds.append(float(msmd))
+    mean_g_att = float(np.mean(g_atts_y2))
     sens_rows.append({
-        'Specification': f'7. Tie-Permuted 1:1 NN PSM (20 random orders; range [{min(perm_atts):+.4f}, {max(perm_atts):+.4f}])',
-        'Sample': 'Joint Sample', 'N_Total': len(df_model), 'N_Matched_Treated': len(t_matched),
-        'Est_Y2_NetZero': float(np.mean(perm_atts)), 'SE_Y2': se_sub,
-        'p_Y2': 2 * (1 - stats.norm.cdf(abs(np.mean(perm_atts) / se_sub))),
-        'Est_Y1_GreenOfferings': np.nan, 'SE_Y1': np.nan, 'p_Y1': np.nan,
-        'Max_PostMatch_SMD': 0.065, 'Critical_Gamma_Y2': float(np.mean(perm_gammas)),
-        'Rosenbaum_p_at_1.00': np.nan, 'Rosenbaum_p_at_1.03': np.nan, 'Rosenbaum_p_at_1.10': np.nan
+        'Specification': (f"2. Greedy 1:1 Logit PSM (100 random tie permutations; "
+                          f"SD={np.std(g_atts_y2):.4f}, range [{min(g_atts_y2):+.4f}, {max(g_atts_y2):+.4f}])"),
+        'Sample': 'Joint Sample (scr14_cat FE)',
+        'N_Total': len(df_model),
+        'N_Matched_Treated': int(len(tm_g)),
+        'Est_Y2_NetZero': mean_g_att,
+        'SE_Y2': se_sub_paired,
+        'p_Y2': float(2.0 * (1.0 - stats.norm.cdf(abs(mean_g_att / se_sub_paired)))),
+        'SE_Y2_Cluster27': se_sub_cl,
+        'p_Y2_Cluster27': float(2.0 * (1.0 - stats.norm.cdf(abs(mean_g_att / se_sub_cl)))),
+        'Est_Y1_GreenOfferings': float(np.mean(g_atts_y1)),
+        'SE_Y1': se_sym_paired,
+        'p_Y1': float(2.0 * (1.0 - stats.norm.cdf(abs(np.mean(g_atts_y1) / se_sym_paired)))),
+        'Max_PostMatch_SMD': float(np.mean(g_smds)),
+        'n_10_T1_C0': np.nan, 'n_01_T0_C1': np.nan, 'n_Discordant': np.nan,
+        'Critical_Gamma_Exact': float(np.mean(g_gammas_ex)),
+        'Critical_Gamma_Normal_CC': np.nan, 'Critical_Gamma_Normal_Uncorr': np.nan,
+        'Exact_p_at_1.00': np.nan, 'Exact_p_at_1.03': np.nan,
+        'Exact_p_at_1.05': np.nan, 'Exact_p_at_1.10': np.nan,
+        'Normal_CC_p_at_1.00': np.nan, 'Normal_CC_p_at_1.05': np.nan, 'Normal_CC_p_at_1.10': np.nan,
     })
 
-    # 8. Single-Outcome IPW Sample (N = 11,521, N_T = 1,291) -> explains Gamma* ≈ 1.03!
-    needed_11521 = ['country_iso2', 'nace_b', 'q14_binary', 'grant_receipt'] + X_cols
-    df_11521 = df[needed_11521].dropna().copy()
+    # 3. Probability-Distance Optimal 1:1 PSM (caliper 0.20 * SD(ps))
+    tm_ps, cm_ps = match_optimal_1to1(ps_nr, T, uids, caliper_mult=0.20)
+    r3, _ = eval_1to1_spec(
+        '3. Probability-Scale Optimal 1:1 PSM (caliper 0.20 SD(ps), no repl.)',
+        'Joint Sample (scr14_cat FE)', len(df_model), tm_ps, cm_ps, Y_sub, Y_sym, X_bal_mat, clusters_all
+    )
+    sens_rows.append(r3)
+
+    # 4. Tight Caliper Optimal 1:1 Logit PSM (0.10 SD(eta))
+    tm_10, cm_10 = match_optimal_1to1(eta_nr, T, uids, caliper_mult=0.10)
+    r4, _ = eval_1to1_spec(
+        '4. Tight Caliper Optimal 1:1 Logit PSM (caliper 0.10 SD(logit PS), no repl.)',
+        'Joint Sample (scr14_cat FE)', len(df_model), tm_10, cm_10, Y_sub, Y_sym, X_bal_mat, clusters_all
+    )
+    sens_rows.append(r4)
+
+    # 5. Very Tight Caliper Optimal 1:1 Logit PSM (0.05 SD(eta))
+    tm_05, cm_05 = match_optimal_1to1(eta_nr, T, uids, caliper_mult=0.05)
+    r5, _ = eval_1to1_spec(
+        '5. Very Tight Caliper Optimal 1:1 Logit PSM (caliper 0.05 SD(logit PS), no repl.)',
+        'Joint Sample (scr14_cat FE)', len(df_model), tm_05, cm_05, Y_sub, Y_sym, X_bal_mat, clusters_all
+    )
+    sens_rows.append(r5)
+
+    # 6. 1:2 Nearest-Neighbor Logit PSM with replacement (0.20 SD(eta))
+    nt_2, a2_2, s2_2, a1_2, s1_2, smd_2 = match_1tok_with_repl(eta_nr, T, Y_sub, Y_sym, X_bal_mat, k_neighbors=2, caliper_mult=0.20)
+    sens_rows.append({
+        'Specification': '6. 1:2 Nearest-Neighbor Logit PSM (caliper 0.20 SD(logit PS), with repl.)',
+        'Sample': 'Joint Sample (scr14_cat FE)', 'N_Total': len(df_model), 'N_Matched_Treated': nt_2,
+        'Est_Y2_NetZero': a2_2, 'SE_Y2': s2_2, 'p_Y2': float(2.0 * (1.0 - stats.norm.cdf(abs(a2_2 / s2_2)))),
+        'SE_Y2_Cluster27': np.nan, 'p_Y2_Cluster27': np.nan,
+        'Est_Y1_GreenOfferings': a1_2, 'SE_Y1': s1_2, 'p_Y1': float(2.0 * (1.0 - stats.norm.cdf(abs(a1_2 / s1_2)))),
+        'Max_PostMatch_SMD': smd_2,
+        'n_10_T1_C0': np.nan, 'n_01_T0_C1': np.nan, 'n_Discordant': np.nan,
+        'Critical_Gamma_Exact': np.nan, 'Critical_Gamma_Normal_CC': np.nan, 'Critical_Gamma_Normal_Uncorr': np.nan,
+        'Exact_p_at_1.00': np.nan, 'Exact_p_at_1.03': np.nan, 'Exact_p_at_1.05': np.nan, 'Exact_p_at_1.10': np.nan,
+        'Normal_CC_p_at_1.00': np.nan, 'Normal_CC_p_at_1.05': np.nan, 'Normal_CC_p_at_1.10': np.nan,
+    })
+
+    # 7. 1:4 Nearest-Neighbor Logit PSM with replacement (0.20 SD(eta))
+    nt_4, a2_4, s2_4, a1_4, s1_4, smd_4 = match_1tok_with_repl(eta_nr, T, Y_sub, Y_sym, X_bal_mat, k_neighbors=4, caliper_mult=0.20)
+    sens_rows.append({
+        'Specification': '7. 1:4 Nearest-Neighbor Logit PSM (caliper 0.20 SD(logit PS), with repl.)',
+        'Sample': 'Joint Sample (scr14_cat FE)', 'N_Total': len(df_model), 'N_Matched_Treated': nt_4,
+        'Est_Y2_NetZero': a2_4, 'SE_Y2': s2_4, 'p_Y2': float(2.0 * (1.0 - stats.norm.cdf(abs(a2_4 / s2_4)))),
+        'SE_Y2_Cluster27': np.nan, 'p_Y2_Cluster27': np.nan,
+        'Est_Y1_GreenOfferings': a1_4, 'SE_Y1': s1_4, 'p_Y1': float(2.0 * (1.0 - stats.norm.cdf(abs(a1_4 / s1_4)))),
+        'Max_PostMatch_SMD': smd_4,
+        'n_10_T1_C0': np.nan, 'n_01_T0_C1': np.nan, 'n_Discordant': np.nan,
+        'Critical_Gamma_Exact': np.nan, 'Critical_Gamma_Normal_CC': np.nan, 'Critical_Gamma_Normal_Uncorr': np.nan,
+        'Exact_p_at_1.00': np.nan, 'Exact_p_at_1.03': np.nan, 'Exact_p_at_1.05': np.nan, 'Exact_p_at_1.10': np.nan,
+        'Normal_CC_p_at_1.00': np.nan, 'Normal_CC_p_at_1.05': np.nan, 'Normal_CC_p_at_1.10': np.nan,
+    })
+
+    # 8. Complete-Case Ordinal Turnover (scr14_clean in 1..9, N = 9,764) Optimal 1:1 Logit PSM
+    df_cc = df_model.dropna(subset=['scr14_clean']).copy()
+    T_cc = df_cc['grant_receipt'].values.astype(float)
+    Y2_cc = df_cc['q14_binary'].values.astype(float)
+    Y1_cc = df_cc['q9_binary'].values.astype(float)
+    X_cc_cov = df_cc[X_cols + ['scr14_clean']].values.astype(float)
+    FE_cc = pd.concat([
+        pd.get_dummies(df_cc['country_iso2'], prefix='c', drop_first=True, dtype=float),
+        pd.get_dummies(df_cc['nace_b'].astype(int), prefix='s', drop_first=True, dtype=float)
+    ], axis=1)
+    X_ps_cc = np.column_stack([X_cc_cov, FE_cc.values, np.ones(len(df_cc))])
+    eta_cc = X_ps_cc @ fit_logit_nr(X_ps_cc, T_cc, tol=1e-13, ridge=0.0)
+    tm_cc, cm_cc = match_optimal_1to1(eta_cc, T_cc, df_cc['uniqid'].values, caliper_mult=0.20)
+    r8, rb_cc = eval_1to1_spec(
+        '8. Complete-Case Turnover (scr14 < 10) Optimal 1:1 Logit PSM (N=9,764)',
+        'Complete-Case Turnover (N=9,764)', len(df_cc), tm_cc, cm_cc, Y2_cc, Y1_cc, X_cc_cov, df_cc['country_iso2'].values
+    )
+    sens_rows.append(r8)
+    for r in rb_cc['grid']:
+        rosenbaum_rows.append({'Sample': f"Complete-Case Turnover (N={len(df_cc):,}, N_T={len(tm_cc)})", **r})
+
+    # 9 & 10. Ordinal Imputed Turnover + DK Indicator (scr14_imp + scr14_dk, N = 11,128): Optimal 1:1 and 1:4 NN
+    X_imp_cov = df_model[X_cols + ['scr14_imp', 'scr14_dk']].values.astype(float)
+    X_ps_imp = np.column_stack([X_imp_cov, FE_c.values, FE_s.values, np.ones(len(df_model))])
+    eta_imp = X_ps_imp @ fit_logit_nr(X_ps_imp, T, tol=1e-13, ridge=0.0)
+    tm_imp, cm_imp = match_optimal_1to1(eta_imp, T, uids, caliper_mult=0.20)
+    r9, _ = eval_1to1_spec(
+        '9. Ordinal Turnover + DK Dummy (scr14_imp + scr14_dk) Optimal 1:1 Logit PSM',
+        'Joint Sample (scr14_imp + DK)', len(df_model), tm_imp, cm_imp, Y_sub, Y_sym, X_imp_cov, clusters_all
+    )
+    sens_rows.append(r9)
+
+    nt_4i, a2_4i, s2_4i, a1_4i, s1_4i, smd_4i = match_1tok_with_repl(eta_imp, T, Y_sub, Y_sym, X_imp_cov, k_neighbors=4, caliper_mult=0.20)
+    sens_rows.append({
+        'Specification': '10. Ordinal Turnover + DK Dummy (scr14_imp + scr14_dk) 1:4 NN PSM w/ repl.',
+        'Sample': 'Joint Sample (scr14_imp + DK)', 'N_Total': len(df_model), 'N_Matched_Treated': nt_4i,
+        'Est_Y2_NetZero': a2_4i, 'SE_Y2': s2_4i, 'p_Y2': float(2.0 * (1.0 - stats.norm.cdf(abs(a2_4i / s2_4i)))),
+        'SE_Y2_Cluster27': np.nan, 'p_Y2_Cluster27': np.nan,
+        'Est_Y1_GreenOfferings': a1_4i, 'SE_Y1': s1_4i, 'p_Y1': float(2.0 * (1.0 - stats.norm.cdf(abs(a1_4i / s1_4i)))),
+        'Max_PostMatch_SMD': smd_4i,
+        'n_10_T1_C0': np.nan, 'n_01_T0_C1': np.nan, 'n_Discordant': np.nan,
+        'Critical_Gamma_Exact': np.nan, 'Critical_Gamma_Normal_CC': np.nan, 'Critical_Gamma_Normal_Uncorr': np.nan,
+        'Exact_p_at_1.00': np.nan, 'Exact_p_at_1.03': np.nan, 'Exact_p_at_1.05': np.nan, 'Exact_p_at_1.10': np.nan,
+        'Normal_CC_p_at_1.00': np.nan, 'Normal_CC_p_at_1.05': np.nan, 'Normal_CC_p_at_1.10': np.nan,
+    })
+
+    # 11. Single-Outcome IPW Sample (N = 11,521, valid Q14) Optimal 1:1 Logit PSM
+    df_11521 = df.dropna(subset=['uniqid', 'country_iso2', 'nace_b', 'scr14_cat', 'q14_binary', 'grant_receipt'] + X_cols).copy()
     T_11521 = df_11521['grant_receipt'].values.astype(float)
     Y2_11521 = df_11521['q14_binary'].values.astype(float)
-    X_cov_11521 = df_11521[X_cols].values.astype(float)
+    X_11521_cov = df_11521[X_cols].values.astype(float)
     FE_11521 = pd.concat([
+        pd.get_dummies(df_11521['scr14_cat'].astype(int), prefix='turn', drop_first=True, dtype=float),
         pd.get_dummies(df_11521['country_iso2'], prefix='c', drop_first=True, dtype=float),
-        pd.get_dummies(df_11521['nace_b'].astype(int), prefix='s', drop_first=True, dtype=float)
+        pd.get_dummies(df_11521['nace_b'].astype(int), prefix='s', drop_first=True, dtype=float),
     ], axis=1)
-    X_ps_11521 = np.column_stack([X_cov_11521, FE_11521.values, np.ones(len(df_11521))])
-    res_11521 = sp_minimize(logistic_negll, np.zeros(X_ps_11521.shape[1]), args=(X_ps_11521, T_11521), method='BFGS')
-    ps_11521 = np.clip(expit(X_ps_11521 @ res_11521.x), 0.01, 0.99)
-    lo_11521 = np.log(ps_11521 / (1.0 - ps_11521))
-    tm_11521, cm_11521 = match_1to1_baseline(ps_11521, lo_11521, T_11521, caliper_mult=0.20)
-    row8 = eval_1to1_spec('8. Single-Outcome Sample 1:1 NN PSM (N=11,521; explains Γ*≈1.03)', 'IPW Sample (Q14 valid)', len(df_11521), tm_11521, cm_11521, Y2_11521, None, X_cov_11521)
-    sens_rows.append(row8)
-    _, p_grid_11521 = rosenbaum_critical_gamma(Y2_11521[tm_11521], Y2_11521[cm_11521])
-    for gamma in [1.0, 1.03, 1.05, 1.1, 1.2, 1.3, 1.5, 2.0]:
-        rosenbaum_rows.append({'Sample': 'Single-Outcome IPW Sample (N=11,521, N_T=1,291)', 'Gamma': gamma, 'Upper_p': p_grid_11521[gamma], 'Critical_Gamma': row8['Critical_Gamma_Y2']})
+    X_ps_11521 = np.column_stack([X_11521_cov, FE_11521.values, np.ones(len(df_11521))])
+    eta_11521 = X_ps_11521 @ fit_logit_nr(X_ps_11521, T_11521, tol=1e-13, ridge=0.0)
+    tm_11521, cm_11521 = match_optimal_1to1(eta_11521, T_11521, df_11521['uniqid'].values, caliper_mult=0.20)
+    r11, rb_11521 = eval_1to1_spec(
+        '11. Single-Outcome Sample Optimal 1:1 Logit PSM (N=11,521, valid Q14)',
+        'Single-Outcome IPW Sample (N=11,521)', len(df_11521), tm_11521, cm_11521,
+        Y2_11521, None, X_11521_cov, df_11521['country_iso2'].values
+    )
+    sens_rows.append(r11)
+    for r in rb_11521['grid']:
+        rosenbaum_rows.append({'Sample': f"Single-Outcome IPW Sample (N={len(df_11521):,}, N_T={len(tm_11521)})", **r})
 
-    # 9. Doubly Robust Augmented IPW (AIPW) on N = 11,128
-    beta_y2_1 = fit_logit_nr(X_ps[T == 1], Y_sub[T == 1])
-    beta_y2_0 = fit_logit_nr(X_ps[T == 0], Y_sub[T == 0])
+    # 12. Exogenous Pre-Treatment Covariates + FE Only (excl. barriers & RECount) Optimal 1:1 Logit PSM
+    exo_cols = ['B2B_private', 'B2G_public', 'B2C', 'scr10']
+    X_exo_cov = df_model[exo_cols].values.astype(float)
+    X_ps_exo = np.column_stack([X_exo_cov, FE_turn.values, FE_c.values, FE_s.values, np.ones(len(df_model))])
+    eta_exo = X_ps_exo @ fit_logit_nr(X_ps_exo, T, tol=1e-13, ridge=0.0)
+    tm_exo, cm_exo = match_optimal_1to1(eta_exo, T, uids, caliper_mult=0.20)
+    r12, _ = eval_1to1_spec(
+        '12. Exogenous Pre-Treatment + FE Optimal 1:1 Logit PSM (excl. barriers & RECount)',
+        'Joint Sample (Exogenous + FE)', len(df_model), tm_exo, cm_exo, Y_sub, Y_sym, X_exo_cov, clusters_all
+    )
+    sens_rows.append(r12)
+
+    # 13. Doubly Robust Augmented IPW (AIPW) on N = 11,128
+    beta_y2_1 = fit_logit_nr(X_ps[T == 1], Y_sub[T == 1], ridge=1e-8)
+    beta_y2_0 = fit_logit_nr(X_ps[T == 0], Y_sub[T == 0], ridge=1e-8)
     mu2_1, mu2_0 = expit(X_ps @ beta_y2_1), expit(X_ps @ beta_y2_0)
     ps_clip = np.clip(ps_nr, 0.02, 0.98)
     aipw_scores_y2 = (mu2_1 - mu2_0) + T * (Y_sub - mu2_1) / ps_clip - (1.0 - T) * (Y_sub - mu2_0) / (1.0 - ps_clip)
     aipw_y2 = float(np.mean(aipw_scores_y2))
     aipw_se_y2 = float(np.std(aipw_scores_y2, ddof=1) / np.sqrt(len(Y_sub)))
+    aipw_se_y2_cl, _ = clustered_pair_se(aipw_scores_y2, clusters_all)
 
-    beta_y1_1 = fit_logit_nr(X_ps[T == 1], Y_sym[T == 1])
-    beta_y1_0 = fit_logit_nr(X_ps[T == 0], Y_sym[T == 0])
+    beta_y1_1 = fit_logit_nr(X_ps[T == 1], Y_sym[T == 1], ridge=1e-8)
+    beta_y1_0 = fit_logit_nr(X_ps[T == 0], Y_sym[T == 0], ridge=1e-8)
     mu1_1, mu1_0 = expit(X_ps @ beta_y1_1), expit(X_ps @ beta_y1_0)
     aipw_scores_y1 = (mu1_1 - mu1_0) + T * (Y_sym - mu1_1) / ps_clip - (1.0 - T) * (Y_sym - mu1_0) / (1.0 - ps_clip)
     aipw_y1 = float(np.mean(aipw_scores_y1))
     aipw_se_y1 = float(np.std(aipw_scores_y1, ddof=1) / np.sqrt(len(Y_sym)))
 
     sens_rows.append({
-        'Specification': '9. Doubly Robust Augmented IPW (AIPW, Logit PS + Logit Outcome)',
-        'Sample': 'Joint Sample', 'N_Total': len(df_model), 'N_Matched_Treated': int(T.sum()),
-        'Est_Y2_NetZero': aipw_y2, 'SE_Y2': aipw_se_y2, 'p_Y2': 2 * (1 - stats.norm.cdf(abs(aipw_y2 / aipw_se_y2))),
-        'Est_Y1_GreenOfferings': aipw_y1, 'SE_Y1': aipw_se_y1, 'p_Y1': 2 * (1 - stats.norm.cdf(abs(aipw_y1 / aipw_se_y1))),
-        'Max_PostMatch_SMD': np.nan, 'Critical_Gamma_Y2': np.nan,
-        'Rosenbaum_p_at_1.00': np.nan, 'Rosenbaum_p_at_1.03': np.nan, 'Rosenbaum_p_at_1.10': np.nan
+        'Specification': '13. Doubly Robust Augmented IPW (AIPW, Exact NR Logit PS + Logit Outcome)',
+        'Sample': 'Joint Sample (scr14_cat FE)', 'N_Total': len(df_model), 'N_Matched_Treated': int(T.sum()),
+        'Est_Y2_NetZero': aipw_y2, 'SE_Y2': aipw_se_y2,
+        'p_Y2': float(2.0 * (1.0 - stats.norm.cdf(abs(aipw_y2 / aipw_se_y2)))),
+        'SE_Y2_Cluster27': aipw_se_y2_cl,
+        'p_Y2_Cluster27': float(2.0 * (1.0 - stats.norm.cdf(abs(aipw_y2 / aipw_se_y2_cl)))),
+        'Est_Y1_GreenOfferings': aipw_y1, 'SE_Y1': aipw_se_y1,
+        'p_Y1': float(2.0 * (1.0 - stats.norm.cdf(abs(aipw_y1 / aipw_se_y1)))),
+        'Max_PostMatch_SMD': np.nan,
+        'n_10_T1_C0': np.nan, 'n_01_T0_C1': np.nan, 'n_Discordant': np.nan,
+        'Critical_Gamma_Exact': np.nan, 'Critical_Gamma_Normal_CC': np.nan, 'Critical_Gamma_Normal_Uncorr': np.nan,
+        'Exact_p_at_1.00': np.nan, 'Exact_p_at_1.03': np.nan, 'Exact_p_at_1.05': np.nan, 'Exact_p_at_1.10': np.nan,
+        'Normal_CC_p_at_1.00': np.nan, 'Normal_CC_p_at_1.05': np.nan, 'Normal_CC_p_at_1.10': np.nan,
     })
 
     sens_df = pd.DataFrame(sens_rows)
     rosenbaum_df = pd.DataFrame(rosenbaum_rows)
-    print("\n  [Alternative Propensity-Score & Matching Sensitivity Suite]")
-    print(sens_df[['Specification', 'N_Matched_Treated', 'Est_Y2_NetZero', 'SE_Y2', 'p_Y2', 'Critical_Gamma_Y2']].round(4).to_string(index=False))
 
-    return att_sub, se_sub, att_sym, se_sym, pd.DataFrame(balance_data), sens_df, rosenbaum_df
+    psm_summary = pd.DataFrame([
+        {
+            'Outcome': 'Reported Net-Zero Strategy (Q14)',
+            'N_Matched_Treated': int(len(t_matched)),
+            'ATT': att_sub,
+            'SE': se_sub_paired,
+            'p': p_sub_paired,
+            'CI_lo': att_sub - 1.96 * se_sub_paired,
+            'CI_hi': att_sub + 1.96 * se_sub_paired,
+            'SE_paired': se_sub_paired,
+            'p_paired': p_sub_paired,
+            'SE_boot_1000': se_sub_boot,
+            'p_boot_1000': p_sub_boot,
+            'SE_cluster27': se_sub_cl,
+            'p_cluster27': p_sub_cl,
+            'p_cluster27_t26': p_sub_cl_t26,
+            'n_10_T1_C0': rb_base['n_10'],
+            'n_01_T0_C1': rb_base['n_01'],
+            'n_Discordant': rb_base['n_disc'],
+            'Critical_Gamma_Exact': rb_base['gamma_exact'],
+            'Critical_Gamma_Normal_CC': rb_base['gamma_cc'],
+        },
+        {
+            'Outcome': 'Green Product Offerings (Q9)',
+            'N_Matched_Treated': int(len(t_matched)),
+            'ATT': att_sym,
+            'SE': se_sym_paired,
+            'p': p_sym_paired,
+            'CI_lo': att_sym - 1.96 * se_sym_paired,
+            'CI_hi': att_sym + 1.96 * se_sym_paired,
+            'SE_paired': se_sym_paired,
+            'p_paired': p_sym_paired,
+            'SE_boot_1000': se_sym_boot,
+            'p_boot_1000': p_sym_boot,
+            'SE_cluster27': se_sym_cl,
+            'p_cluster27': p_sym_cl,
+            'p_cluster27_t26': p_sym_cl_t26,
+            'n_10_T1_C0': int(np.sum((Y_sym[t_matched] == 1) & (Y_sym[c_matched] == 0))),
+            'n_01_T0_C1': int(np.sum((Y_sym[t_matched] == 0) & (Y_sym[c_matched] == 1))),
+            'n_Discordant': int(np.sum(Y_sym[t_matched] != Y_sym[c_matched])),
+            'Critical_Gamma_Exact': np.nan,
+            'Critical_Gamma_Normal_CC': np.nan,
+        }
+    ])
+
+    print("\n  [PSM 13-Specification Sensitivity Suite]")
+    print(sens_df[['Specification', 'N_Matched_Treated', 'Est_Y2_NetZero', 'SE_Y2', 'p_Y2', 'Critical_Gamma_Exact']].round(4).to_string(index=False))
+
+    return psm_summary, pd.DataFrame(balance_data), sens_df, rosenbaum_df
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -476,23 +721,24 @@ def run_psm(df):
 # ═══════════════════════════════════════════════════════════════════
 
 def run_decoupling_moderation(df):
-    """Cross-level OLS interaction model (Model 4, Equation H7) with BOTH Country-Clustered SEs and HC1 SEs."""
-    print("\n\n" + "=" * 70)
-    print("CROSS-LEVEL DIGITAL INTENSITY MODERATION (Model 4, Equation H7)")
-    print("=" * 70)
+    """Cross-level OLS interaction model (Model 4) on DI = Y1 - Y2 (N = 12,205)."""
+    print("\n" + "=" * 76)
+    print("PHASE 2: Cross-Level Digital Intensity Moderation (Model 4, N = 12,205)")
+    print("=" * 76)
 
     needed = ['country_iso2', 'DI', 'B2B_private', 'B2G_public', 'DII_composite',
-              'scr10', 'scr14', 're_action_count']
+              'scr10', 'scr14_cat', 're_action_count']
     df_model = df[needed].dropna().copy()
-    print(f"  Complete cases: {len(df_model):,} across {df_model['country_iso2'].nunique()} country clusters")
 
     df_model['DII_std'] = (df_model['DII_composite'] - df_model['DII_composite'].mean()) / df_model['DII_composite'].std()
     df_model['B2B_x_DII'] = df_model['B2B_private'] * df_model['DII_std']
 
-    X_cols = ['B2B_private', 'DII_std', 'B2B_x_DII', 'B2G_public',
-              'scr10', 'scr14', 're_action_count']
-    X = np.column_stack([df_model[X_cols].values.astype(float), np.ones(len(df_model))])
-    var_names = X_cols + ['const']
+    focal_cols = ['B2B_private', 'DII_std', 'B2B_x_DII', 'B2G_public', 'scr10', 're_action_count']
+    turn_fe = pd.get_dummies(df_model['scr14_cat'].astype(int), prefix='turn', drop_first=True, dtype=float)
+    X_df = pd.concat([df_model[focal_cols].astype(float), turn_fe], axis=1)
+    X_df['const'] = 1.0
+    var_names = list(X_df.columns)
+    X = X_df.values
     y = df_model['DI'].values.astype(float)
     clusters = pd.factorize(df_model['country_iso2'])[0]
 
@@ -500,53 +746,55 @@ def run_decoupling_moderation(df):
     res_cl = model.fit(cov_type='cluster', cov_kwds={'groups': clusters})
     res_hc1 = model.fit(cov_type='HC1')
 
-    print(f"\n  === OLS Results: Country-Clustered SEs (G=27) vs. HC1 Robust SEs (R² = {res_cl.rsquared:.4f}) ===")
-    print(f"  {'Variable':<20} {'Coef':>9} {'SE_cluster':>11} {'p_cluster':>10} {'p_t26':>9} {'SE_HC1':>9} {'p_HC1':>9}")
-    print(f"  {'-'*82}")
-
     ols_results = []
     for j, v in enumerate(var_names):
         b = float(res_cl.params[j])
         se_c = float(res_cl.bse[j])
         t_c = b / se_c
-        p_c = float(2 * (1 - stats.norm.cdf(abs(t_c))))
-        p_t26 = float(2 * (1 - stats.t.cdf(abs(t_c), df=26)))
+        p_c = float(2.0 * (1.0 - stats.norm.cdf(abs(t_c))))
+        p_t26 = float(2.0 * (1.0 - stats.t.cdf(abs(t_c), df=26)))
         se_h = float(res_hc1.bse[j])
         p_h = float(res_hc1.pvalues[j])
-        print(f"  {v:<20} {b:>+9.4f} {se_c:>11.4f} {p_c:>10.4f} {p_t26:>9.4f} {se_h:>9.4f} {p_h:>9.4f}")
         ols_results.append({
             'Variable': v, 'Coef': b,
             'SE_cluster': se_c, 't_cluster': t_c, 'p_cluster': p_c, 'p_t26': p_t26,
-            'SE_robust_HC1': se_h, 't_HC1': float(res_hc1.tvalues[j]), 'p_HC1': p_h
+            'SE_robust_HC1': se_h, 't_HC1': float(res_hc1.tvalues[j]), 'p_HC1': p_h,
+            'N': len(df_model), 'R2': float(res_cl.rsquared)
         })
+
+    ols_df = pd.DataFrame(ols_results)
+    print(ols_df[ols_df['Variable'].isin(focal_cols + ['const'])].round(4).to_string(index=False))
 
     country_di = df.groupby('country_iso2').agg(
         Mean_DI=('DI', 'mean'),
         N=('DI', 'count'),
         DII=('DII_composite', 'first'),
-        Pct_GreenOfferingsOnly=('DI', lambda x: (x == 1).mean())
+        Pct_GreenOfferingsOnly=('DI', lambda x: (x.dropna() == 1).mean())
     ).sort_values('Mean_DI')
 
-    return pd.DataFrame(ols_results), country_di
+    return ols_df, country_di
 
 
 # ═══════════════════════════════════════════════════════════════════
-# PART 3: Ordered Probit - Operating Cost Impact (Model 5, Equation H8)
+# PART 3: Ordered Probit - Operating Cost Impact (Model 5)
 # ═══════════════════════════════════════════════════════════════════
 
 def run_green_premium(df):
     """
-    Ordered probit of perceived production cost impact (Q3) on sustainability profiles,
-    reporting both the N = 10,011 sample (all valid Q3 in [1..5]) and the N = 9,058 sample
-    (adding valid Q4 in [1..6]), with and without 26 country FE + 3 sector FE, and country-clustered SEs.
+    3-category Ordered Probit of perceived production cost impact (Q3) on sustainability profiles:
+      cost_outcome = 0 if Q3 in {1, 2} (decreased),
+                     1 if Q3 == 5       (unchanged),
+                     2 if Q3 in {3, 4} (increased)
+    Estimated with categorical turnover bracket FEs (scr14_cat) and 9-item re_action_count.
     """
-    print("\n\n" + "=" * 70)
-    print("ORDERED PROBIT - Operating Cost Impact (Model 5, Equation H8)")
-    print("=" * 70)
+    print("\n" + "=" * 76)
+    print("PHASE 3: Operating Cost Impact 3-Category Ordered Probit (Model 5)")
+    print("=" * 76)
 
     needed_base = ['country_iso2', 'nace_b', 'q3', 'q4', 'q9_binary', 'q14_binary',
-                   'scr10', 'scr14', 're_action_count']
-    df_10011 = df[needed_base].dropna().copy()
+                   'scr10', 'scr14_cat', 're_action_count', 'barrier_admin']
+    df_10011 = df.dropna(subset=['country_iso2', 'nace_b', 'q3', 'q9_binary', 'q14_binary',
+                                 'scr10', 'scr14_cat', 're_action_count', 'barrier_admin']).copy()
     df_10011 = df_10011[df_10011['q3'].isin([1, 2, 3, 4, 5])].copy()
     df_10011['cost_outcome'] = df_10011['q3'].map({
         1: 0, 2: 0,  # decreased
@@ -558,8 +806,6 @@ def run_green_premium(df):
     df_10011['both'] = ((df_10011['q9_binary'] == 1) & (df_10011['q14_binary'] == 1)).astype(float)
     df_10011['neither'] = ((df_10011['q9_binary'] == 0) & (df_10011['q14_binary'] == 0)).astype(float)
 
-    print(f"  Complete cases (valid Q3 in routed sample): N = {len(df_10011):,}")
-
     ct_results = []
     for cat, label in [('neither', 'Neither (0,0)'), ('green_only', 'Green Offerings Only (1,0)'),
                        ('netzero_only', 'Net-Zero Strategy Only (0,1)'), ('both', 'Both Activities (1,1)')]:
@@ -567,92 +813,78 @@ def run_green_premium(df):
         co = df_10011.loc[mask, 'cost_outcome']
         ct_results.append({
             'Category': label, 'N': int(mask.sum()),
-            'Pct_Decreased': float((co == 0).mean() * 100),
-            'Pct_Unchanged': float((co == 1).mean() * 100),
-            'Pct_Increased': float((co == 2).mean() * 100)
+            'Pct_Decreased': float((co == 0).mean() * 100.0),
+            'Pct_Unchanged': float((co == 1).mean() * 100.0),
+            'Pct_Increased': float((co == 2).mean() * 100.0)
         })
 
     op_rows = []
 
     def fit_op_spec(spec_label, d_sub, x_cols, include_fe=True):
         cl = pd.factorize(d_sub['country_iso2'])[0]
+        turn_fe = pd.get_dummies(d_sub['scr14_cat'].astype(int), prefix='turn', drop_first=True, dtype=float)
         if include_fe:
             fe = pd.concat([
+                turn_fe,
                 pd.get_dummies(d_sub['country_iso2'], prefix='c', drop_first=True, dtype=float),
                 pd.get_dummies(d_sub['nace_b'].astype(int), prefix='s', drop_first=True, dtype=float)
             ], axis=1)
-            X_mat = pd.concat([d_sub[x_cols].astype(float), fe], axis=1)
         else:
-            X_mat = d_sub[x_cols].astype(float)
+            fe = turn_fe
+        X_mat = pd.concat([d_sub[x_cols].astype(float), fe], axis=1)
         mod = OrderedModel(d_sub['cost_outcome'], X_mat, distr='probit')
-        res_cl = mod.fit(method='bfgs', disp=False, cov_type='cluster', cov_kwds={'groups': cl})
-        res_iid = mod.fit(method='bfgs', disp=False)
-        print(f"\n  === {spec_label} (N = {len(d_sub):,}) ===")
+        res_cl = mod.fit(method='bfgs', maxiter=500, disp=False, cov_type='cluster', cov_kwds={'groups': cl})
+        res_iid = mod.fit(method='bfgs', maxiter=500, disp=False)
         for v in x_cols:
             b = float(res_cl.params[v])
             se_c = float(res_cl.bse[v])
             p_c = float(res_cl.pvalues[v])
-            p_t26 = float(2 * (1 - stats.t.cdf(abs(b / se_c), df=26)))
+            p_t26 = float(2.0 * (1.0 - stats.t.cdf(abs(b / se_c), df=26)))
             se_i = float(res_iid.bse[v])
             p_i = float(res_iid.pvalues[v])
-            print(f"  {v:<20}: β = {b:+.4f} | SE_cl = {se_c:.4f} (p_cl = {p_c:.4f}, t26 p = {p_t26:.4f}) | SE_iid = {se_i:.4f} (p_iid = {p_i:.4f})")
             op_rows.append({
                 'Spec': spec_label, 'Variable': v, 'Beta': b,
                 'SE_cluster': se_c, 'p_cluster': p_c, 'p_t26': p_t26,
-                'SE_iid': se_i, 'p_iid': p_i, 'N': len(d_sub)
+                'SE_iid': se_i, 'p_iid': p_i, 'N': int(len(d_sub))
             })
 
-    # 1. Baseline Binary Y1 & Y2 without FE (N = 10,011)
-    fit_op_spec('Spec 1: Binary Y1 & Y2 (Baseline Controls, N=10,011)', df_10011, ['q9_binary', 'q14_binary', 'scr10', 'scr14', 're_action_count'], include_fe=False)
+    fit_op_spec('Spec 1: Binary Y1 & Y2 (Baseline Controls + Turnover FE, N=10,011)',
+                df_10011, ['q9_binary', 'q14_binary', 'scr10', 're_action_count'], include_fe=False)
+    fit_op_spec('Spec 2: Binary Y1 & Y2 (+ Country/Sector/Turnover FE, N=10,011)',
+                df_10011, ['q9_binary', 'q14_binary', 'scr10', 're_action_count'], include_fe=True)
+    fit_op_spec('Spec 3: 4-Quadrant Typology (+ Country/Sector/Turnover FE, N=10,011)',
+                df_10011, ['green_only', 'netzero_only', 'both', 'scr10', 're_action_count'], include_fe=True)
 
-    # 2. Binary Y1 & Y2 + Country/Sector FE (N = 10,011)
-    fit_op_spec('Spec 2: Binary Y1 & Y2 (+ Country/Sector FE, N=10,011)', df_10011, ['q9_binary', 'q14_binary', 'scr10', 'scr14', 're_action_count'], include_fe=True)
-
-    # 3. 4-Quadrant Typology + Country/Sector FE (N = 10,011)
-    fit_op_spec('Spec 3: 4-Quadrant Typology (+ Country/Sector FE, N=10,011)', df_10011, ['green_only', 'netzero_only', 'both', 'scr10', 'scr14', 're_action_count'], include_fe=True)
-
-    # 4. Binary Y1 & Y2 + Valid Q4 [1..6] + Country/Sector FE (N = 9,058)
     df_9058 = df_10011[df_10011['q4'].isin([1, 2, 3, 4, 5, 6])].copy()
-    fit_op_spec('Spec 4: Binary Y1 & Y2 (+ Valid Q4 [1..6] + Country/Sector FE, N=9,058)', df_9058, ['q9_binary', 'q14_binary', 'q4', 'scr10', 'scr14', 're_action_count'], include_fe=True)
+    fit_op_spec('Spec 4: Binary Y1 & Y2 (+ Valid Q4 [1..6] + Country/Sector/Turnover FE, N=9,058)',
+                df_9058, ['q9_binary', 'q14_binary', 'q4', 'scr10', 're_action_count'], include_fe=True)
+    fit_op_spec('Spec 5: 4-Quadrant Typology (+ Valid Q4 [1..6] + Country/Sector/Turnover FE, N=9,058)',
+                df_9058, ['green_only', 'netzero_only', 'both', 'q4', 'scr10', 're_action_count'], include_fe=True)
 
-    # 5. 4-Quadrant Typology + Valid Q4 [1..6] + Country/Sector FE (N = 9,058)
-    fit_op_spec('Spec 5: 4-Quadrant Typology (+ Valid Q4 [1..6] + Country/Sector FE, N=9,058)', df_9058, ['green_only', 'netzero_only', 'both', 'q4', 'scr10', 'scr14', 're_action_count'], include_fe=True)
-
-    return pd.DataFrame(ct_results), pd.DataFrame(op_rows)
+    op_df = pd.DataFrame(op_rows)
+    print(op_df.round(4).to_string(index=False))
+    return pd.DataFrame(ct_results), op_df
 
 
 def main():
     df = pd.read_csv(DATA_FILE)
-    print(f"Loaded: {len(df):,} observations\n")
-
-    att_sub, se_sub, att_sym, se_sym, balance_df, sens_df, rosenbaum_df = run_psm(df)
+    psm_summary, balance_df, sens_df, rosenbaum_df = run_psm(df)
     ols_df, country_di = run_decoupling_moderation(df)
     ct_df, op_df = run_green_premium(df)
 
     mode = 'a' if os.path.exists(RESULTS_XLSX) else 'w'
     with pd.ExcelWriter(RESULTS_XLSX, engine='openpyxl', mode=mode,
                         if_sheet_exists='replace' if mode == 'a' else None) as writer:
-        psm_summary = pd.DataFrame([{
-            'Outcome': 'Reported Net-Zero Strategy (Q14)', 'ATT': att_sub, 'SE': se_sub,
-            'p': 2 * (1 - stats.norm.cdf(abs(att_sub / se_sub))),
-            'CI_lo': att_sub - 1.96 * se_sub, 'CI_hi': att_sub + 1.96 * se_sub
-        }, {
-            'Outcome': 'Green Product Offerings (Q9)', 'ATT': att_sym, 'SE': se_sym,
-            'p': 2 * (1 - stats.norm.cdf(abs(att_sym / se_sym))),
-            'CI_lo': att_sym - 1.96 * se_sym, 'CI_hi': att_sym + 1.96 * se_sym
-        }])
         psm_summary.to_excel(writer, sheet_name='PSM_ATT', index=False)
         balance_df.to_excel(writer, sheet_name='PSM_Balance', index=False)
         sens_df.to_excel(writer, sheet_name='PSM_Sensitivity_Specs', index=False)
         rosenbaum_df.to_excel(writer, sheet_name='Rosenbaum_Bounds', index=False)
-
         ols_df.to_excel(writer, sheet_name='DI_Moderation_OLS', index=False)
         country_di.to_excel(writer, sheet_name='DI_Country_Level')
-
         ct_df.to_excel(writer, sheet_name='GreenPremium_CrossTab', index=False)
         op_df.to_excel(writer, sheet_name='GreenPremium_OrderedProbit', index=False)
 
-    print(f"\n  ✓ All results saved to: {RESULTS_XLSX}")
+    print(f"\n  ✓ Saved PSM, Rosenbaum, Model 4, and Model 5 outputs to {RESULTS_XLSX}")
 
 
 if __name__ == '__main__':
