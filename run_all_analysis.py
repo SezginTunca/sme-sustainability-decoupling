@@ -1,24 +1,62 @@
 #!/usr/bin/env python3
 """
-run_all_analysis.py
-===================
-Master One-Click Econometric Replication Runner for:
+Scripts/run_all_analysis.py
+================================================================================
+Master Analytical Pipeline Runner for:
   "Green Offerings and Net-Zero Plans: Markets, Capabilities and Finance in European SMEs"
   (Business Strategy and the Environment; Concept DOI: 10.5281/zenodo.23619994)
 
-Executes the complete raw-to-verified pipeline sequentially from unmodified raw files:
+Orchestrates the entire empirical research workflow starting from unmodified raw data:
   0. Environment & SHA-256 Raw Data Integrity Audit (never modifies raw files)
-  1. Scripts/01_build_analytical_sample.py -> Cleaned CSV/XLSX + 253-Var Codebook
-  2. Scripts/02_bivariate_probit.py        -> Joint FIML Bivariate Probit + Wald/AME/Holm (m=6)
-  3. Scripts/03_causal_forest.py           -> Exact NR Propensity + Stabilized IPW + Subgroup CATEs
-  4. Scripts/04_psm_and_remaining.py       -> Optimal 1:1 Logit PSM + Exact/Normal Rosenbaum + Models 4 & 5
-  5. Scripts/05_robustness.py              -> 4-Quadrant MNLogit + 12-Spec Robustness + H3c Moderation + Appendix M
-  6. Scripts/06_verify_all_results.py      -> 120+ Automated Assertions Against Results, Manuscript & SI
+  1. Data Processing & Data Handling:
+     - Scripts/01_build_analytical_sample.py
+       -> Raw Flash Eurobarometer 498 (ZA7806) filtering (EU-27, SMEs 1-249 employees)
+       -> Systematic questionnaire routing verification & feature engineering
+       -> Eurostat Digital Intensity Index (isoc_e_dii, 2021) country merge
+       -> Cleaned analytical dataset (Data/Processed/SME_Analytical_Final.csv)
+       -> Complete 253-variable codebook (Data/Documentation/Codebook_ZA7806_Raw_and_Cleaned.xlsx)
+       -> Input data consolidated workbook (Data/Input_Data_Consolidated.xlsx)
+
+  2. Formal Econometric Analysis:
+     - Scripts/02_bivariate_probit.py
+       -> Joint Full Information Maximum Likelihood (FIML) Bivariate Probit (N = 11,128)
+       -> 27-country cluster-robust covariance and finite-sample t(26) inference
+       -> Average Marginal Effects (AMEs) and cross-equation Wald tests
+       -> Holm-Bonferroni family-wise error rate corrections (m = 6 focal hypotheses)
+
+  3. Data Analysis & Causal Estimation:
+     - Scripts/03_causal_forest.py
+       -> Exact Newton-Raphson propensity score estimation without heuristic clipping
+       -> Strict common support trimming [0.01, 0.99] and Kish Effective Sample Size diagnostics
+       -> Stabilized Inverse Probability Weighting (IPW) Average Treatment Effects
+       -> Subgroup Conditional Average Treatment Effects (CATEs) across sectors, sizes & countries
+
+  4. Formal Causal & Sensitivity Analysis:
+     - Scripts/04_psm_and_remaining.py
+       -> Austin (2011) Optimal 1:1 Minimum-Distance Bipartite Matching on logit propensity
+       -> Exact McNemar Binomial and Normal approximation Rosenbaum sensitivity bounds
+       -> Cross-level Digital Intensity Index OLS regressions (Model 4, N = 12,205)
+       -> Operating cost impact Ordered Probit regressions (Model 5, N = 10,011 & 9,058)
+
+  5. Formal Robustness Analysis & Extensions:
+     - Scripts/05_robustness.py
+       -> Table 3 Four-Quadrant Multinomial Logit discrete AMEs
+       -> Table 6 Twelve-Specification Consolidated Robustness Matrix & Sector Splits
+       -> Hypothesis H3c Public Support Moderation (Country-Clustered Delta-Method Delta-AME)
+       -> Appendix M Empirical Extensions (Ext1 Tightened Constructs, Ext2 Q8 Mechanism, Ext3 Wave 6)
+
+  6. Comprehensive Verification Suite (Author QA):
+     - Scripts/06_verify_all_results.py (or Scripts/confidential/06_verify_all_results.py)
+       -> 200 automated programmatic assertions validating workbooks, figures, and manuscripts
 
 Usage:
-  python run_all_analysis.py
+  python Scripts/run_all_analysis.py              # Run complete pipeline including verification
+  python Scripts/run_all_analysis.py --core-only  # Run core data process, handling, and formal analysis (Steps 1-5)
+  python Scripts/run_all_analysis.py --verify     # Run verification suite only (Step 6)
+================================================================================
 """
 
+import argparse
 import hashlib
 import importlib
 import os
@@ -26,9 +64,16 @@ import subprocess
 import sys
 import time
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+_this_dir = os.path.dirname(os.path.abspath(__file__))
+if os.path.basename(_this_dir) == "Scripts":
+    BASE_DIR = os.path.dirname(_this_dir)
+    SCRIPTS_DIR = _this_dir
+else:
+    BASE_DIR = _this_dir
+    SCRIPTS_DIR = os.path.join(BASE_DIR, "Scripts")
+
 RAW_DIR = os.path.join(BASE_DIR, "Data", "Raw")
-SCRIPTS_DIR = os.path.join(BASE_DIR, "Scripts")
+CONFIDENTIAL_DIR = os.path.join(SCRIPTS_DIR, "confidential")
 
 EXPECTED_SHA256 = {
     "ZA7806_SAV": (
@@ -66,14 +111,33 @@ REQUIRED_PACKAGES = [
     ("openpyxl", "openpyxl"),
 ]
 
-PIPELINE_STEPS = [
-    ("01_build_analytical_sample.py", "Sample Construction, Clean Recoding & 253-Variable Codebook"),
-    ("02_bivariate_probit.py", "Joint FIML Bivariate Probit, Clustered Inference & Holm (m=6) Tests"),
-    ("03_causal_forest.py", "Exact NR Propensity, Stabilized IPW ATE & Subgroup CATEs"),
-    ("04_psm_and_remaining.py", "Optimal 1:1 Bipartite Logit PSM, Exact/Normal Rosenbaum & Models 4-5"),
-    ("05_robustness.py", "4-Quadrant MNLogit, 12-Spec Robustness, H3c Moderation & Appendix M"),
-    ("06_verify_all_results.py", "Automated Cross-Document & Econometric Verification Suite"),
+CORE_PIPELINE_STEPS = [
+    (
+        "01_build_analytical_sample.py",
+        "Data Processing & Data Handling: Sample Construction, Clean Recoding & 253-Variable Codebook",
+    ),
+    (
+        "02_bivariate_probit.py",
+        "Formal Econometric Analysis: Joint FIML Bivariate Probit, Clustered Inference & Holm (m=6) Tests",
+    ),
+    (
+        "03_causal_forest.py",
+        "Data Analysis: Exact NR Propensity Scores, Stabilized IPW ATE & Subgroup CATEs",
+    ),
+    (
+        "04_psm_and_remaining.py",
+        "Formal Analysis: Austin (2011) Optimal 1:1 Logit PSM, Exact/Normal Rosenbaum & Models 4-5",
+    ),
+    (
+        "05_robustness.py",
+        "Formal Robustness Analysis: 4-Quadrant MNLogit, 12-Spec Matrix, H3c Moderation & Appendix M",
+    ),
 ]
+
+VERIFICATION_STEP = (
+    "06_verify_all_results.py",
+    "Comprehensive Verification: Automated Cross-Document & Econometric Verification Suite (200 Checks)",
+)
 
 
 def sha256_file(filepath):
@@ -90,7 +154,8 @@ def check_environment_and_raw_data():
     print("=" * 80)
     print(f"  Python executable : {sys.executable}")
     print(f"  Python version    : {sys.version.split()[0]}")
-    print(f"  Working root      : {BASE_DIR}")
+    print(f"  Project root      : {BASE_DIR}")
+    print(f"  Scripts directory : {SCRIPTS_DIR}")
 
     missing_pkgs = []
     for pkg_label, mod_name in REQUIRED_PACKAGES:
@@ -135,23 +200,30 @@ def check_environment_and_raw_data():
             print(f"  [RAW OK] {os.path.relpath(found_path, BASE_DIR)} (SHA-256: {actual_hash[:16]}...)")
 
 
-def main():
-    t_total = time.time()
-    check_environment_and_raw_data()
+def resolve_script_path(script_name):
+    # Check standard Scripts/ location first
+    p1 = os.path.join(SCRIPTS_DIR, script_name)
+    if os.path.exists(p1):
+        return p1
+    # Check Scripts/confidential/
+    p2 = os.path.join(CONFIDENTIAL_DIR, script_name)
+    if os.path.exists(p2):
+        return p2
+    return None
 
+
+def run_pipeline(steps):
+    t_total = time.time()
     step_timings = []
-    for idx, (script_name, desc) in enumerate(PIPELINE_STEPS, start=1):
-        script_path = os.path.join(SCRIPTS_DIR, script_name)
-        if not os.path.exists(script_path):
-            conf_path = os.path.join(SCRIPTS_DIR, "confidential", script_name)
-            if os.path.exists(conf_path):
-                script_path = conf_path
-            else:
-                print(f"\nERROR: Missing pipeline script: {script_path}")
-                sys.exit(1)
+
+    for idx, (script_name, desc) in enumerate(steps, start=1):
+        script_path = resolve_script_path(script_name)
+        if not script_path:
+            print(f"\nERROR: Missing pipeline script: {script_name}")
+            sys.exit(1)
 
         print("\n" + "=" * 80)
-        print(f"STEP {idx}/{len(PIPELINE_STEPS)}: {script_name} -- {desc}")
+        print(f"STEP {idx}/{len(steps)}: {script_name} -- {desc}")
         print("=" * 80)
         t0 = time.time()
         res = subprocess.run([sys.executable, script_path], cwd=BASE_DIR)
@@ -163,7 +235,7 @@ def main():
 
     total_dt = time.time() - t_total
     print("\n" + "=" * 80)
-    print("ONE-CLICK REPLICATION PIPELINE SUMMARY (ALL STEPS PASSED)")
+    print("ANALYTICAL PIPELINE EXECUTION SUMMARY (ALL STEPS PASSED)")
     print("=" * 80)
     for script_name, dt, code in step_timings:
         print(f"  [PASS] {script_name:<34} {dt:7.1f}s (exit {code})")
@@ -174,6 +246,37 @@ def main():
     print(f"  Consolidated tables: {os.path.join('Data', 'Results_Consolidated.xlsx')}")
     print("  Next step (figures): python generate_all_figures.py")
     print("=" * 80)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Master Analytical Pipeline Runner for European SME Sustainability Decoupling Research"
+    )
+    parser.add_argument(
+        "--core-only",
+        action="store_true",
+        help="Run core data processing, data handling, data analysis, and formal analysis steps (01-05)",
+    )
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="Run verification suite only (06_verify_all_results.py)",
+    )
+    args = parser.parse_args()
+
+    check_environment_and_raw_data()
+
+    if args.verify:
+        steps = [VERIFICATION_STEP]
+    elif args.core_only:
+        steps = CORE_PIPELINE_STEPS
+    else:
+        # Default: Core analytical steps + verification if available
+        steps = list(CORE_PIPELINE_STEPS)
+        if resolve_script_path(VERIFICATION_STEP[0]):
+            steps.append(VERIFICATION_STEP)
+
+    run_pipeline(steps)
 
 
 if __name__ == "__main__":
