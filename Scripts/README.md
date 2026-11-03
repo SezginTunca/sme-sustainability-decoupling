@@ -1,6 +1,6 @@
-# Core Empirical Scripts: Data Processing, Econometric Models, and Automated Verification
+# Core Empirical Scripts: Data Processing, Econometric Models, and Analysis Pipeline
 
-This directory contains the reproducible econometric estimation, document compilation, and automated verification scripts for:
+This directory contains the reproducible econometric estimation and empirical pipeline scripts for:
 
 **"Green Offerings and Net-Zero Plans: Markets, Capabilities and Finance in European SMEs"**  
 **Target Journal:** *Business Strategy and the Environment* (Wiley)  
@@ -11,15 +11,20 @@ This directory contains the reproducible econometric estimation, document compil
 
 ## Quick Start
 
-From the project root, run the complete SHA-256 audited replication and verification pipeline in one command:
+From the project root (or within `Scripts/`), run the complete SHA-256 audited replication pipeline in one command:
 
 ```bash
 pip install -r requirements.txt
-python3 run_all_analysis.py
+python3 Scripts/run_all_analysis.py
 python3 generate_all_figures.py
 ```
 
-Or run each script individually in numerical order:
+To run only the core empirical pipeline (Steps 1 to 5):
+```bash
+python3 Scripts/run_all_analysis.py --core-only
+```
+
+Or run each core empirical script individually in numerical sequence:
 
 ```bash
 python3 Scripts/01_build_analytical_sample.py
@@ -27,7 +32,6 @@ python3 Scripts/02_bivariate_probit.py
 python3 Scripts/03_causal_forest.py
 python3 Scripts/04_psm_and_remaining.py
 python3 Scripts/05_robustness.py
-python3 Scripts/06_verify_all_results.py
 ```
 
 ---
@@ -59,8 +63,10 @@ python3 Scripts/06_verify_all_results.py
 - **Outputs:** `Data/Processed/Robustness_FE.xlsx` (9 sheets) and corresponding sheets in `Data/Results_Consolidated.xlsx`.
 - **Manuscript Mapping:** **Tables 3 and 6**; Section 4.3; Section 4.4; Section 4.5; Section 4.6; Appendices B, C, J, L, M.
 
-### 6. `06_verify_all_results.py`
-- **Role:** Automated end-to-end verification suite executing **195+ programmatic assertions** across `Data/Results_Consolidated.xlsx` (all 33 sheets), `Data/Input_Data_Consolidated.xlsx` (all 8 sheets), `Data/Documentation/Codebook_ZA7806_Raw_and_Cleaned.xlsx` (all 3 sheets, 253 raw variables), all 14 figure assets, citation reciprocity (72 references), Zenodo DOI consistency (`10.5281/zenodo.23619994`), Markdown table column integrity, and prose/number alignment in `BSE_Main_Manuscript_Revision.md` and `BSE_Supporting_Information_Revision.md`.
+---
 
-### 7. `compile_revision_docx_and_pdf.py`
-- **Role:** Reproducible Pandoc (`markdown-smart`) + `python-docx` (12 pt Times New Roman, booktabs tables) + Headless Chrome PDF compiler and dynamic section/paragraph-aligned native Word Track Changes (`<w:ins>` / `<w:del>`) generator for all resubmission deliverables.
+## Confidential Author Utilities (`Scripts/confidential/`)
+
+Author-internal quality assurance and document compilation scripts reside in [`Scripts/confidential/`](confidential/):
+- **`Scripts/confidential/06_verify_all_results.py`**: Automated end-to-end audit suite executing **200 programmatic assertions** across workbooks, display items, citation reciprocity (72 references), Zenodo DOI consistency (`10.5281/zenodo.23619994`), and manuscript alignment.
+- **`Scripts/confidential/compile_revision_docx_and_pdf.py`**: Document compiler generating publication-ready Word DOCX manuscripts, native XML Track Changes (`<w:ins>` / `<w:del>`), response letters, and high-resolution PDFs.
