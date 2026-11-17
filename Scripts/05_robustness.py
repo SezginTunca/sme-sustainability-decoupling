@@ -739,7 +739,7 @@ def main():
         mod_df.to_excel(writer, sheet_name='Moderation_Clustered', index=False)
         cv_both_df.to_excel(writer, sheet_name='Construct_Validity_Table1', index=False)
         p9_df.to_excel(writer, sheet_name='Point9_Construct_Validity', index=False)
-        ext1_df.to_excel(writer, sheet_name='Ext1_Tightened_Construct_BiProbit', index=False)
+        ext1_df.to_excel(writer, sheet_name='Ext1_Tightened_BiProbit', index=False)
         ext2_df.to_excel(writer, sheet_name='Ext2_Q8_Desired_Support', index=False)
         if ext3_df is not None:
             ext3_df.to_excel(writer, sheet_name='Ext3_Wave6_ZA8869_Replication', index=False)

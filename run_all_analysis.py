@@ -26,8 +26,8 @@ Orchestrates the entire empirical research workflow starting from unmodified raw
 
   3. Data Analysis & Causal Estimation:
      - Scripts/03_causal_forest.py
-       -> Exact Newton-Raphson propensity score estimation without heuristic clipping
-       -> Strict common support trimming [0.01, 0.99] and Kish Effective Sample Size diagnostics
+       -> Exact Newton-Raphson logistic propensity score estimation
+       -> Propensity score bounding [0.02, 0.98] and Kish Effective Sample Size diagnostics
        -> Stabilized Inverse Probability Weighting (IPW) Average Treatment Effects
        -> Subgroup Conditional Average Treatment Effects (CATEs) across sectors, sizes & countries
 
@@ -47,7 +47,7 @@ Orchestrates the entire empirical research workflow starting from unmodified raw
 
   6. Comprehensive Verification Suite (Author QA):
      - Scripts/06_verify_all_results.py (or Scripts/confidential/06_verify_all_results.py)
-       -> 200 automated programmatic assertions validating workbooks, figures, and manuscripts
+       -> 200+ automated programmatic assertions validating workbooks, figures, and manuscripts
 
 Usage:
   python Scripts/run_all_analysis.py              # Run complete pipeline including verification
@@ -73,6 +73,7 @@ else:
     SCRIPTS_DIR = os.path.join(BASE_DIR, "Scripts")
 
 RAW_DIR = os.path.join(BASE_DIR, "Data", "Raw")
+DATA_DIR = os.path.join(BASE_DIR, "Data")
 CONFIDENTIAL_DIR = os.path.join(SCRIPTS_DIR, "confidential")
 
 EXPECTED_SHA256 = {
@@ -136,7 +137,7 @@ CORE_PIPELINE_STEPS = [
 
 VERIFICATION_STEP = (
     "06_verify_all_results.py",
-    "Comprehensive Verification: Automated Cross-Document & Econometric Verification Suite (200 Checks)",
+    "Comprehensive Verification: Automated Cross-Document & Econometric Verification Suite (200+ Checks)",
 )
 
 
@@ -146,6 +147,31 @@ def sha256_file(filepath):
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def find_input_file(candidates):
+    """Search for raw input files across multiple common paths:
+    1. Data/Raw/<cand>
+    2. Data/<cand>
+    3. <BASE_DIR>/<cand>
+    4. Recursive search within Data/ matching candidate basename
+    """
+    search_dirs = [RAW_DIR, DATA_DIR, BASE_DIR]
+    for cand in candidates:
+        for sdir in search_dirs:
+            p = os.path.join(sdir, cand)
+            if os.path.exists(p) and os.path.isfile(p):
+                return p
+
+    if os.path.exists(DATA_DIR):
+        for cand in candidates:
+            target_name = os.path.basename(cand)
+            for root, _, files in os.walk(DATA_DIR):
+                if target_name in files:
+                    p = os.path.join(root, target_name)
+                    if os.path.isfile(p):
+                        return p
+    return None
 
 
 def check_environment_and_raw_data():
@@ -174,20 +200,25 @@ def check_environment_and_raw_data():
 
     print("\n  Verifying SHA-256 checksums of unmodified raw inputs:")
     for key, (candidates, expected_hash, required) in EXPECTED_SHA256.items():
-        found_path = None
-        for rel in candidates:
-            p = os.path.join(RAW_DIR, rel)
-            if os.path.exists(p):
-                found_path = p
-                break
+        found_path = find_input_file(candidates)
         if found_path is None:
             if required:
-                print(f"  [RAW MISSING] {key}: Expected in {RAW_DIR} ({candidates[0]})")
-                print("  Download ZA7806 (https://doi.org/10.4232/1.13934) into Data/Raw/ before running.")
+                print(f"  [RAW MISSING] {key}: Expected in Data/Raw/ or Data/ ({candidates[0]})")
+                print("  Download ZA7806 (https://doi.org/10.4232/1.13934) into Data/Raw/ or Data/ before running.")
                 sys.exit(1)
             else:
-                print(f"  [RAW OPTIONAL] {key}: Not present in Data/Raw/ (Wave 6 out-of-sample check will skip gracefully)")
+                print(f"  [RAW OPTIONAL] {key}: Not present in Data/Raw/ or Data/ (Wave 6 out-of-sample check will skip gracefully)")
                 continue
+
+        # If file is found outside Data/Raw/, ensure Data/Raw/ exists and create relative symlink if feasible
+        os.makedirs(RAW_DIR, exist_ok=True)
+        target_in_raw = os.path.join(RAW_DIR, os.path.basename(found_path))
+        if not os.path.exists(target_in_raw):
+            try:
+                rel_link = os.path.relpath(found_path, RAW_DIR)
+                os.symlink(rel_link, target_in_raw)
+            except Exception:
+                pass  # Non-fatal
 
         actual_hash = sha256_file(found_path)
         if expected_hash and actual_hash != expected_hash:
@@ -250,7 +281,7 @@ def run_pipeline(steps):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Master Analytical Pipeline Runner for European SME Sustainability Decoupling Research"
+        description="Master Analytical Pipeline Runner for European SME Green Offerings and Net-Zero Plans Research"
     )
     parser.add_argument(
         "--core-only",

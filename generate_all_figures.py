@@ -62,10 +62,11 @@ EXCEL_PATH = os.path.join(DATA_DIR, "Results_Consolidated.xlsx")
 FIG_DIR = os.path.join(BASE_DIR, "Figures")
 REV_DIR = os.path.join(BASE_DIR, "Revision")
 MANU_FIG_DIR = os.path.join(BASE_DIR, "Manuscript", "Figures")
+PKG_ROOT_FIG_DIR = os.path.join(BASE_DIR, "SME_Replication_Package", "Figures")
 PKG_FIG_DIR = os.path.join(BASE_DIR, "SME_Replication_Package", "Manuscript", "Figures")
 
 EXPORT_DIRS = [FIG_DIR]
-for opt_dir in [REV_DIR, MANU_FIG_DIR, PKG_FIG_DIR]:
+for opt_dir in [REV_DIR, MANU_FIG_DIR, PKG_ROOT_FIG_DIR, PKG_FIG_DIR]:
     parent = os.path.dirname(opt_dir)
     if opt_dir == REV_DIR and os.path.isdir(REV_DIR):
         EXPORT_DIRS.append(REV_DIR)
@@ -143,6 +144,10 @@ def stars(p):
     if p < 0.05:
         return "*"
     return ""
+
+
+def fmt_p(p):
+    return "p < 0.001" if p < 0.001 else f"p = {p:.3f}"
 
 
 def save_all_formats(fig, basename):
@@ -441,7 +446,7 @@ def generate_figure_4(xl):
         marker = "D" if sig else "o"
         ax.plot(c_est, y, marker=marker, color=color, markersize=9.0 if sig else 7.8, markeredgecolor="white", markeredgewidth=1.2, zorder=4)
 
-        sig_txt = f" (p = {p_val:.3f})" if sig else f" (p = {p_val:.3f}, n.s.)"
+        sig_txt = f" ({fmt_p(p_val)})" if sig else f" ({fmt_p(p_val)}, n.s.)"
         ax.text(
             hi + 0.005, y,
             f"+{c_est:.3f}{sig_txt}",
@@ -453,7 +458,7 @@ def generate_figure_4(xl):
     c_admin0 = float(cate_df.iloc[1]["CATE"])
     ax.annotate(
         f"Concentrated Support Effect Under\nAdministrative Complexity (H3c)\n"
-        f"(+{c_admin1:.3f} vs. +{c_admin0:.3f}; Delta CATE = +{delta_admin:.3f}, p = {p_delta_admin:.3f})",
+        f"(+{c_admin1:.3f} vs. +{c_admin0:.3f}; Delta CATE = +{delta_admin:.3f}, {fmt_p(p_delta_admin)})",
         xy=(c_admin1, y_positions[0] - 0.08),
         xytext=(0.195, y_positions[1] + 0.12),
         fontsize=10.6, fontweight="bold", color=CORAL, ha="center", va="center",
@@ -580,7 +585,7 @@ def generate_path_diagram(xl, basename, with_moderation=True):
         ax.text(
             7.0, -0.58,
             f"Barrier Moderation on Y2 (H3c, Probability Scale): Delta AME of Public Financial Support (Admin = 1 vs. 0) = "
-            f"+{d_ame['est']:.3f} (95% CI [+{d_ame['lo']:.3f}, +{d_ame['hi']:.3f}], p = {d_ame['p']:.3f})",
+            f"+{d_ame['est']:.3f} (95% CI [+{d_ame['lo']:.3f}, +{d_ame['hi']:.3f}], {fmt_p(float(d_ame['p']))})",
             ha="center", va="center", fontsize=9.5, color="#5B21B6", fontweight="bold",
             bbox=dict(boxstyle="round,pad=0.36", facecolor="#F5F3FF", edgecolor="#8B5CF6"),
         )
@@ -898,7 +903,7 @@ def generate_figure_s3(xl):
     ax.yaxis.grid(True, linestyle="--", alpha=0.35, color="#CBD5E1", zorder=0)
 
     ax.annotate(
-        f"Concentrated Support Effect Among\nAdministratively Constrained SMEs\n(Delta CATE = +{delta_admin:.3f}, p = {p_delta_admin:.3f})",
+        f"Concentrated Support Effect Among\nAdministratively Constrained SMEs\n(Delta CATE = +{delta_admin:.3f}, {fmt_p(p_delta_admin)})",
         xy=(0.28, cates[0]),
         xytext=(2.05, 0.140),
         fontsize=10.4, fontweight="bold", color=CORAL, ha="center",
@@ -974,7 +979,7 @@ def generate_figure_s4(xl):
 
     ax.text(
         0.97, 0.04,
-        f"Country-Level OLS Slope: beta = {slope:+.4f}\nR-squared = {r_val ** 2:.3f} (two-tailed p = {p_val:.3f})",
+        f"Country-Level OLS Slope: beta = {slope:+.4f}\nR-squared = {r_val ** 2:.3f} (two-tailed {fmt_p(p_val)})",
         transform=ax.transAxes, ha="right", va="bottom", fontsize=10.8, color="#334155", style="italic",
         bbox=dict(boxstyle="round,pad=0.42", facecolor="white", edgecolor="#CBD5E1", alpha=0.94),
     )

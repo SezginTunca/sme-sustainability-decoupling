@@ -45,9 +45,13 @@
 │   ├── 03_causal_forest.py              # Exact NR propensity, stabilized IPW ATE & subgroup CATEs
 │   ├── 04_psm_and_remaining.py          # Optimal 1:1 bipartite PSM, Rosenbaum bounds & Models 4-5
 │   ├── 05_robustness.py                 # 4-Quadrant MNLogit, 12-spec Table 6, H3c & Appendix M
-│   ├── 06_verify_all_results.py         # 195+ automated econometric & manuscript assertions
-│   ├── compile_revision_docx_and_pdf.py # Pandoc/python-docx/Chrome DOCX, TrackChanges & PDF exporter
+│   ├── confidential/                    # Author-internal QA & build utilities (excluded from public archive)
+│   │   ├── 06_verify_all_results.py     # 200+ automated econometric & manuscript assertions
+│   │   ├── compile_revision_docx_and_pdf.py # Pandoc/python-docx/Chrome DOCX, TrackChanges & PDF exporter
+│   │   └── README.md                    # Documentation for confidential author utilities
 │   ├── requirements.txt                 # Core Python dependencies
+│   ├── run_all_analysis.py              # Copy of master runner for Scripts/ execution
+│   ├── generate_all_figures.py          # Copy of figure generator for Scripts/ execution
 │   └── README.md                        # Script-by-script technical guide
 │
 ├── Figures/                             # 14 display items in 600 DPI PNG, vector PDF, and SVG
@@ -63,16 +67,18 @@ To run the data processing pipeline from scratch:
 
 1. **Flash Eurobarometer 498 (`ZA7806`, Wave 5, Primary Dataset):**
    - **Source:** GESIS Data Archive for the Social Sciences
-   - **Study:** *Flash Eurobarometer 498: SMEs, resource efficiency and green markets, wave 5* (November-December 2021)
+   - **Study:** *Flash Eurobarometer 498: SMEs, resource efficiency and green markets, wave 5* (Fieldwork: November–December 2021)
    - **DOI:** [10.4232/1.13934](https://doi.org/10.4232/1.13934) (`https://search.gesis.org/research_data/ZA7806`)
-   - **Action:** Place `FL498_2021_ZA7806.sav` (or `ZA7806_v1-0-0.sav`) in `Data/Raw/`.
+   - **Action:** Place `FL498_2021_ZA7806.sav` (or `ZA7806_v1-0-0.sav`) in `Data/Raw/` or directly in `Data/`. The runner automatically searches both paths.
 2. **Eurostat Digital Intensity Index (`isoc_e_dii`):**
    - **Source:** Eurostat (*Enterprises with high/very high digital intensity index*, `E_DI3_HI` and `E_DI3_VHI`, 2021)
-   - **Action:** Place `Eurostat_Digital_Intensity.tsv` in `Data/Raw/`.
+   - **Action:** Place `Eurostat_Digital_Intensity.tsv` in `Data/Raw/` or `Data/`.
 3. **Flash Eurobarometer 549 (`ZA8869`, Wave 6, Optional Out-of-Sample Extension `Ext3`):**
    - **Source:** GESIS Data Archive (*Flash Eurobarometer 549: SMEs, resource efficiency and green markets, wave 6*, 2024)
    - **DOI:** [10.4232/1.14493](https://doi.org/10.4232/1.14493) (`https://search.gesis.org/research_data/ZA8869`)
-   - **Action:** Place `ZA8869_v1-0-0.sav` in `Data/Raw/` to run the Appendix M `Ext3` replication ($N = 11,246$ EU-27 SMEs).
+   - **Action:** Place `ZA8869_v1-0-0.sav` in `Data/Raw/` or `Data/` to run the Appendix M `Ext3` replication ($N = 11,246$ EU-27 SMEs).
+
+> **Data Redistribution & Licensing Notice:** In accordance with GESIS Data Archive terms of use and European Commission data policies, raw microdata files from Eurobarometer surveys (`ZA7806` and `ZA8869`) cannot be redistributed directly inside a public Git repository. They are freely available for scientific research upon simple registration on the GESIS portal (links provided above). Once downloaded and placed in either `Data/Raw/` or `Data/`, the entire pipeline executes fully automatically with a single command.
 
 ---
 
@@ -82,7 +88,7 @@ To run the data processing pipeline from scratch:
 # 1. Install dependencies
 pip install -r requirements.txt
 
-# 2. Run the full raw-to-verified econometric pipeline (Steps 01-06 + 195+ assertions)
+# 2. Run the full raw-to-verified econometric pipeline (Steps 01-05; + Step 06 if Scripts/confidential/ is present)
 python3 run_all_analysis.py
 
 # 3. Regenerate all 14 publication figures (Figures 1-5 and S1-S9 in PNG, PDF, SVG)
@@ -114,11 +120,11 @@ The analysis examines how market-channel orientation (`scr15`), perceived capabi
 - **H2b (Environmental Expertise Shortages, `Q7.6`):** **Supported with theoretical refinement.** Negatively associated with both $Y_1$ ($\hat{\beta}_1 = -0.090, p = 0.008, \text{AME}_1 = -0.032$) and $Y_2$ ($\hat{\beta}_2 = -0.220, p < 0.001, \text{AME}_2 = -0.067$), penalizing net-zero planning twice as severely ($\Delta\hat{\beta} = +0.129, z = 3.05, p = 0.002, m = 6\text{ Holm } p = 0.012$).
 
 ### 4. Public Financial Support & Administrative Moderation (`H3a`, `H3b`, `H3c`; `Tables 2, 4, 5, 6`)
-- **H3a (Direct Net-Zero Association):** **Supported with sensitivity qualifications.** Joint probit $\hat{\beta}_2 = +0.121$ ($p = 0.009, \text{AME}_2 = +0.039$); IPW $\widehat{\text{ATE}} = +0.043$ ($p_{\text{reest}} = 0.004, p_{\text{IF,cl}} = 0.027$, $\text{ESS}_T = 876.1$); AIPW $\widehat{\text{ATE}} = +0.041$ ($p = 0.006, p_{\text{cl}} = 0.033$); optimal 1:1 bipartite PSM $\widehat{\text{ATT}} = +0.040$ (paired $p = 0.036$, cluster $p = 0.193$; $\max |\text{SMD}| = 0.058$); exact Rosenbaum critical $\Gamma^* = 1.035$ ($N = 11,128$) and $\Gamma^* = 1.102$ ($N = 9,764$).
+- **H3a (Direct Net-Zero Association):** **Supported with sensitivity qualifications.** Joint probit $\hat{\beta}_2 = +0.121$ ($p = 0.009, \text{AME}_2 = +0.039$); IPW $\widehat{\text{ATE}} = +0.043$ ($p_{\text{reest}} = 0.004, p_{\text{IF,cl}} = 0.027$, $\text{ESS}_T = 876.1$); AIPW $\widehat{\text{ATE}} = +0.041$ ($p = 0.006, p_{\text{cl}} = 0.033$); optimal 1:1 bipartite PSM $\widehat{\text{ATT}} = +0.040$ (paired $p = 0.036$, cluster $p = 0.193$; $\max |\text{SMD}| = 0.058$ across focal covariates, $\le 0.070$ across all 45 covariates incl. FEs); exact Rosenbaum critical $\Gamma^* = 1.035$ ($N = 11,128$) and $\Gamma^* = 1.102$ ($N = 9,764$).
 - **H3b (Cross-Domain Support Contrast):** **Not supported on binary indicators** ($\hat{\beta}_1 = +0.072, p = 0.060$; $\Delta\hat{\beta} = -0.049, p = 0.449$).
 - **H3c (Administrative Barrier Moderation):** **Supported.** Conditional $\text{AME}(\text{Admin}=1) = +0.081$ ($p < 0.001$) vs. $\text{AME}(\text{Admin}=0) = +0.008$ ($p = 0.688$), yielding $\Delta\text{AME}_{\text{Admin}} = +0.073$ ($\text{SE}_{\text{cl}} = 0.022, 95\%\text{ CI } [+0.029, +0.117], p = 0.0011, t_{26}\ p = 0.0030$; IPW $\Delta\widehat{\text{CATE}}_{\text{Admin}} = +0.073, p = 0.022$). Expertise moderation is null ($\Delta\text{AME}_{\text{Exp}} = -0.008, p = 0.788$).
 
-### 5. Exploratory Extensions (`Section 4.6` & `Appendix M`)
+### 5. Empirical and Exploratory Extensions (`Sections 4.5-4.6` & `Appendix M`)
 - **Model 4 (Digital Intensity Moderation, $N = 12,205$):** $\text{B2B} \times \text{DII}_{\text{std}} = -0.009$ ($\text{SE}_{\text{cl}} = 0.017, p = 0.598$).
 - **Model 5 (Operating Cost Ordered Probit, $N = 10,011$ & $N = 9,058$):** Green offerings positively predict perceived cost increases ($\hat{\beta}_{Q9} = +0.079, p = 0.008$ on $N = 10,011$; $+0.064, p = 0.048$ controlling for `Q4` on $N = 9,058$), whereas reported net-zero strategies are null ($\hat{\beta}_{Q14} = +0.001, p = 0.980$).
 - **Appendix M (`Ext1`-`Ext3`):** Intensity-conditioned constructs (`Ext1`, $\Delta\hat{\beta}_{\text{Support}} = -0.172, p = 0.015$), `Q8` desired-support validation (`Ext2`), and 2024 Wave 6 `ZA8869` out-of-sample replication (`Ext3`, $N = 11,246$, $\hat{\rho} = +0.197$, `Support -> Y2` $\hat{\beta}_2 = +0.153, p < 0.001$).

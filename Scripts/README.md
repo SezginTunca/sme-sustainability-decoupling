@@ -19,12 +19,17 @@ python3 Scripts/run_all_analysis.py
 python3 generate_all_figures.py
 ```
 
+To run only the automated verification checks (Step 6):
+```bash
+python3 Scripts/run_all_analysis.py --verify
+```
+
 To run only the core empirical pipeline (Steps 1 to 5):
 ```bash
 python3 Scripts/run_all_analysis.py --core-only
 ```
 
-Or run each core empirical script individually in numerical sequence:
+Or run each script individually in numerical sequence:
 
 ```bash
 python3 Scripts/01_build_analytical_sample.py
@@ -32,6 +37,7 @@ python3 Scripts/02_bivariate_probit.py
 python3 Scripts/03_causal_forest.py
 python3 Scripts/04_psm_and_remaining.py
 python3 Scripts/05_robustness.py
+python3 Scripts/06_verify_all_results.py
 ```
 
 ---
@@ -51,22 +57,18 @@ python3 Scripts/05_robustness.py
 ### 3. `03_causal_forest.py`
 - **Role:** Exact Newton-Raphson logistic propensity model ($N = 11,521, k = 46, \|\nabla\ell\|_\infty = 5.68 \times 10^{-14}$), Hajek stabilized IPW ($\widehat{\text{ATE}} = +0.0433$, re-estimated PS bootstrap $\text{SE} = 0.0148, p = 0.0036$; 27-country clustered influence-function $\text{SE} = 0.0195, p = 0.0267$; Kish $\text{ESS}_T = 876.1$), and subgroup CATE heterogeneity ($\Delta\widehat{\text{CATE}}_{\text{Admin}} = +0.0732, \text{SE} = 0.0319, p = 0.0220$).
 - **Outputs:** `Data/Processed/IPW_Propensity_Scores.csv` and `CausalForest_ATE`, `CausalForest_CATEs`, `IPW_Diagnostics` in `Data/Results_Consolidated.xlsx`.
-- **Manuscript Mapping:** **Figure 4**, **Figures S3, S6**; Section 4.4; Appendix F; Appendix I (`Tables I1-I2`).
+- **Manuscript Mapping:** **Figure 4**, **Figures S3, S6**; Section 4.4; Appendix F; Appendix I (`Table I1`).
 
 ### 4. `04_psm_and_remaining.py`
-- **Role:** Order-invariant optimal 1:1 bipartite logit-caliper matching (`scipy.optimize.linear_sum_assignment`, $0.2 \times \text{SD}$ caliper $= 0.1617$, $1,256$ matched pairs, $\max |\text{SMD}| = 0.0579$, $\widehat{\text{ATT}}_{Y_2} = +0.0398$, paired $\text{SE} = 0.0190, p = 0.0363$, cluster $\text{SE} = 0.0306, p = 0.1930$; $\widehat{\text{ATT}}_{Y_1} = +0.0231, p = 0.2320$), 13-specification matching/AIPW sensitivity suite (AIPW $\widehat{\text{ATE}}_{Y_2} = +0.0413, p = 0.0056, p_{\text{cl}} = 0.0334$), exact and normal-approximation Rosenbaum bounds across three samples ($\Gamma^* = 1.0345$ on $N = 11,128$; $\Gamma^* = 1.1024$ on $N = 9,764$; $\Gamma^* = 1.0877$ on $N = 11,521$), `Model 4` cross-level DII OLS ($N = 12,205, \hat{\beta}_3 = -0.0091, p_{\text{cl}} = 0.5980$), and `Model 5` 5-spec operating-cost Ordered Probit ($N = 10,011$ and $N = 9,058$).
+- **Role:** Order-invariant optimal 1:1 bipartite logit-caliper matching (`scipy.optimize.linear_sum_assignment`, $0.2 \times \text{SD}$ caliper $= 0.1474$, $1,256$ matched pairs, $\max |\text{SMD}| = 0.0579$ across focal covariates and $0.0699$ across all 45 covariates incl. country/sector FEs, $\widehat{\text{ATT}}_{Y_2} = +0.0398$, paired $\text{SE} = 0.0190, p = 0.0363$, cluster $\text{SE} = 0.0306, p = 0.1930$; $\widehat{\text{ATT}}_{Y_1} = +0.0231, p = 0.2320$), 13-specification matching/AIPW sensitivity suite (AIPW $\widehat{\text{ATE}}_{Y_2} = +0.0413, p = 0.0056, p_{\text{cl}} = 0.0334$), exact and normal-approximation Rosenbaum bounds across three samples ($\Gamma^* = 1.0345$ on $N = 11,128$; $\Gamma^* = 1.1024$ on $N = 9,764$; $\Gamma^* = 1.0877$ on $N = 11,521$), `Model 4` cross-level DII OLS ($N = 12,205, \hat{\beta}_3 = -0.0091, p_{\text{cl}} = 0.5980$), and `Model 5` 5-spec operating-cost Ordered Probit ($N = 10,011$ and $N = 9,058$).
 - **Outputs:** `PSM_ATT`, `PSM_Balance`, `PSM_Sensitivity_Specs`, `Rosenbaum_Bounds`, `DI_Moderation_OLS`, `DI_Country_Level`, `GreenPremium_CrossTab`, and `GreenPremium_OrderedProbit` sheets in `Data/Results_Consolidated.xlsx`.
-- **Manuscript Mapping:** **Tables 4-5**; Section 4.4; Section 4.6; Appendices D, E, H, I, L (`Table L6`).
+- **Manuscript Mapping:** **Tables 4-5**; Section 4.4; Section 4.6; Appendices D, E, H, I (`Tables I2-I3`), L (`Table L6`).
 
 ### 5. `05_robustness.py`
 - **Role:** Four-Quadrant Multinomial Logit discrete AMEs (`Table 3`, $N = 11,128$), 12-specification joint bivariate probit robustness matrix (`Table 6`: baseline, no `RECount`, 10-item `RECount`, `w1_sme` and `w93_sme` PML, strict 2030 planners $N = 10,624$, `Q5.3=1` support seekers $N = 2,959 / 3,055$, `SCR16` product-selling SMEs $N = 7,299$, expanded covariates $N = 9,857$, 12-section NACE `nace_a` FE, complete-case turnover $N = 9,764$, mean-imputed turnover + DK dummy, plus sector splits), cluster-robust delta-method probability-scale moderation (`H3c`: $\Delta\text{AME}_{\text{Admin}} = +0.0730, \text{SE}_{\text{cl}} = 0.0223, p = 0.0011, t_{26}\ p = 0.0030$), and **Appendix M** extensions (`Ext1` tightened constructs, `Ext2` `Q8` desired support, `Ext3` 2024 Wave 6 `ZA8869` out-of-sample replication $N = 11,246$).
 - **Outputs:** `Data/Processed/Robustness_FE.xlsx` (9 sheets) and corresponding sheets in `Data/Results_Consolidated.xlsx`.
 - **Manuscript Mapping:** **Tables 3 and 6**; Section 4.3; Section 4.4; Section 4.5; Section 4.6; Appendices B, C, J, L, M.
 
----
-
-## Confidential Author Utilities (`Scripts/confidential/`)
-
-Author-internal quality assurance and document compilation scripts reside in [`Scripts/confidential/`](confidential/):
-- **`Scripts/confidential/06_verify_all_results.py`**: Automated end-to-end audit suite executing **200 programmatic assertions** across workbooks, display items, citation reciprocity (72 references), Zenodo DOI consistency (`10.5281/zenodo.23619994`), and manuscript alignment.
-- **`Scripts/confidential/compile_revision_docx_and_pdf.py`**: Document compiler generating publication-ready Word DOCX manuscripts, native XML Track Changes (`<w:ins>` / `<w:del>`), response letters, and high-resolution PDFs.
+### 6. `06_verify_all_results.py`
+- **Role:** Automated end-to-end econometric and replication verification suite executing programmatic assertions across processed CSVs, consolidated Excel workbooks (33 sheets), codebook documentation, and generated 600-DPI PNG and vector PDF display items.
+- **Usage:** `python3 Scripts/06_verify_all_results.py` or `python3 run_all_analysis.py --verify`.

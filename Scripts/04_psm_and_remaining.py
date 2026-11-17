@@ -260,7 +260,7 @@ def clustered_pair_se(pair_diffs, clusters):
     uniq_cl = np.unique(clusters)
     G = len(uniq_cl)
     cl_sums = np.array([u[clusters == c].sum() for c in uniq_cl])
-    var_cl = (G / (G - 1.0)) * ((n - 1.0) / (n - 1.0)) * np.sum(cl_sums ** 2) / (n ** 2)
+    var_cl = (G / (G - 1.0)) * np.sum(cl_sums ** 2) / (n ** 2)
     return float(np.sqrt(var_cl)), G
 
 
@@ -346,6 +346,21 @@ def run_psm(df):
             'Var_Ratio': var_ratio,
             'Balanced': abs(smd_after) < 0.10
         })
+
+    max_smd_focal16 = float(max(abs(d['SMD_After']) for d in balance_data))
+    max_smd_all45 = 0.0
+    max_smd_all45_var = ""
+    all_45_names = X_cols + list(FE_turn.columns) + list(FE_c.columns) + list(FE_s.columns)
+    for j, v_name in enumerate(all_45_names):
+        vt_45 = float(X_full[t_matched, j].var())
+        vc_45 = float(X_full[c_matched, j].var())
+        sp_45 = float(np.sqrt((vt_45 + vc_45) / 2.0))
+        smd_45 = abs(float(X_full[t_matched, j].mean()) - float(X_full[c_matched, j].mean())) / sp_45 if sp_45 > 0 else 0.0
+        if smd_45 > max_smd_all45:
+            max_smd_all45 = float(smd_45)
+            max_smd_all45_var = v_name
+    print(f"  - Post-match balance: max |SMD| = {max_smd_focal16:.4f} (16 enterprise/turnover covs), "
+          f"{max_smd_all45:.4f} (all 45 covs incl. FEs; max on {max_smd_all45_var})")
 
     # ATT & Standard Errors (Paired Analytical, 1,000-draw Paired Bootstrap, Country-Clustered)
     diff_sub = Y_sub[t_matched] - Y_sub[c_matched]
@@ -686,6 +701,8 @@ def run_psm(df):
             'n_Discordant': rb_base['n_disc'],
             'Critical_Gamma_Exact': rb_base['gamma_exact'],
             'Critical_Gamma_Normal_CC': rb_base['gamma_cc'],
+            'Max_SMD_Focal16': max_smd_focal16,
+            'Max_SMD_All45': max_smd_all45,
         },
         {
             'Outcome': 'Green Product Offerings (Q9)',
@@ -707,6 +724,8 @@ def run_psm(df):
             'n_Discordant': int(np.sum(Y_sym[t_matched] != Y_sym[c_matched])),
             'Critical_Gamma_Exact': np.nan,
             'Critical_Gamma_Normal_CC': np.nan,
+            'Max_SMD_Focal16': max_smd_focal16,
+            'Max_SMD_All45': max_smd_all45,
         }
     ])
 

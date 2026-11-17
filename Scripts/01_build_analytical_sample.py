@@ -33,25 +33,42 @@ if not os.path.exists(DATA_DIR) and os.path.exists(os.path.join(os.path.dirname(
 RAW_DIR = os.path.join(DATA_DIR, "Raw")
 DOC_DIR = os.path.join(DATA_DIR, "Documentation")
 
+def resolve_data_file(candidates):
+    search_dirs = [RAW_DIR, DATA_DIR, PROJECT_DIR]
+    for cand in candidates:
+        for sdir in search_dirs:
+            p = os.path.join(sdir, cand)
+            if os.path.exists(p) and os.path.isfile(p):
+                return p
+    if os.path.exists(DATA_DIR):
+        for cand in candidates:
+            bname = os.path.basename(cand)
+            for root, _, files in os.walk(DATA_DIR):
+                if bname in files:
+                    p = os.path.join(root, bname)
+                    if os.path.isfile(p):
+                        return p
+    return os.path.join(RAW_DIR, candidates[0])
+
 SAV_CANDIDATES = [
-    os.path.join(RAW_DIR, "ZA7806_v1-0-0.sav"),
-    os.path.join(RAW_DIR, "FL498_2021_ZA7806.sav"),
-    os.path.join(RAW_DIR, "Data_Flash_Eurobarometer_498_SMEs_resource_efficiency_and_green_markets", "FL498_2021_ZA7806.sav"),
+    "ZA7806_v1-0-0.sav",
+    "FL498_2021_ZA7806.sav",
+    os.path.join("Data_Flash_Eurobarometer_498_SMEs_resource_efficiency_and_green_markets", "FL498_2021_ZA7806.sav"),
 ]
-SAV_FILE = next((p for p in SAV_CANDIDATES if os.path.exists(p)), SAV_CANDIDATES[0])
+SAV_FILE = resolve_data_file(SAV_CANDIDATES)
 
 W6_CANDIDATES = [
-    os.path.join(RAW_DIR, "ZA8869_v1-0-0.sav"),
-    os.path.join(RAW_DIR, "ZA8869_v2-0-0.sav"),
-    os.path.join(RAW_DIR, "All_Raw_datasets_SME_Res_Eff",
+    "ZA8869_v1-0-0.sav",
+    "ZA8869_v2-0-0.sav",
+    os.path.join("All_Raw_datasets_SME_Res_Eff",
                  "Flash Eurobarometer 549 (SMEs, Resource Efficiency and Green Markets, wave 6)",
                  "ZA8869_v1-0-0.sav"),
 ]
-W6_SAV_FILE = next((p for p in W6_CANDIDATES if os.path.exists(p)), None)
+_w6_resolved = resolve_data_file(W6_CANDIDATES)
+W6_SAV_FILE = _w6_resolved if os.path.exists(_w6_resolved) else None
 
-EUROSTAT_TSV = os.path.join(RAW_DIR, "Eurostat_Digital_Intensity.tsv")
-if not os.path.exists(EUROSTAT_TSV):
-    EUROSTAT_TSV = os.path.join(DATA_DIR, "Eurostat_Digital_Intensity.tsv")
+EUROSTAT_CANDIDATES = ["Eurostat_Digital_Intensity.tsv"]
+EUROSTAT_TSV = resolve_data_file(EUROSTAT_CANDIDATES)
 
 OUTPUT_CSV = os.path.join(DATA_DIR, "Processed", "SME_Analytical_Final.csv")
 OUTPUT_XLSX = os.path.join(DATA_DIR, "Input_Data_Consolidated.xlsx")

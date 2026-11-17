@@ -9,8 +9,11 @@ __pycache__/
 .vscode/
 .idea/
 
-# EXCLUDE ALL DATASETS & DATA FILES
-Data/
+# EXCLUDE ALL DATASETS & DATA FILES (allow static markdown codebook mapping)
+Data/*
+!Data/Documentation/
+Data/Documentation/*
+!Data/Documentation/SME_Codebook_Hypothesis_Mapping.md
 *.sav
 *.dta
 *.tsv
