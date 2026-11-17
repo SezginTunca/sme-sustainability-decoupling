@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="962.425281pt" height="542.076031pt" viewBox="0 0 962.425281 542.076031" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-11-17T12:56:31.590779</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.10.3, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 542.076031 
+L 962.425281 542.076031 
+L 962.425281 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 229.825281 495.072 
+L 955.225281 495.072 
+L 955.225281 7.2 
+L 229.825281 7.2 
+z
+" style="fill: #ffffff"/>
+   </g>
+   <g id="matplotlib.axis_1">
+    <g id="xtick_1">
+     <g id="line2d_1">
+      <defs>
+       <path id="macff5371a3" d="M 0 0 
+L 0 3.5 
+" style="stroke: #000000; stroke-width: 0.85"/>
+      </defs>
+      <g>
+       <use xlink:href="#macff5371a3" x="469.255515" y="495.072" style="stroke: #000000; stroke-width: 0.85"/>
+      </g>
+     </g>
+     <g id="text_1">
+      <text style="font-weight: 700; font-size: 11.5px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle" x="469.255515" y="510.443641" transform="rotate(-0 469.255515 510.443641)">No Green Offerings (64.7%)</text>
+     </g>
+    </g>
+    <g id="xtick_2">
+     <g id="line2d_2">
+      <g>
+       <use xlink:href="#macff5371a3" x="818.005515" y="495.072" style="stroke: #000000; stroke-width: 0.85"/>
+      </g>
+     </g>
+     <g id="text_2">
+      <text style="font-weight: 700; font-size: 11.5px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle" x="818.005515" y="510.443641" transform="rotate(-0 818.005515 510.443641)">Active Green Offerings (35.3%)</text>
+     </g>
+    </g>
+    <g id="text_3">
+     <text style="font-weight: 700; font-size: 12.8px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle" x="592.525281" y="532.182031" transform="rotate(-0 592.525281 532.182031)">Market-Facing Green Product or Service Offerings (Q9: No vs. Yes)</text>
+    </g>
+   </g>
+   <g id="matplotlib.axis_2">
+    <g id="ytick_1">
+     <g id="line2d_3">
+      <defs>
+       <path id="m2c99327d48" d="M 0 0 
+L -3.5 0 
+" style="stroke: #000000; stroke-width: 0.85"/>
+      </defs>
+      <g>
+       <use xlink:href="#m2c99327d48" x="229.825281" y="435.812599" style="stroke: #000000; stroke-width: 0.85"/>
+      </g>
+     </g>
+     <g id="text_4">
+      <text style="font-weight: 700; font-size: 11.5px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: end" x="222.825281" y="439.99842" transform="rotate(-0 222.825281 439.99842)">Reported Net-Zero Strategy (27.8%)</text>
+     </g>
+    </g>
+    <g id="ytick_2">
+     <g id="line2d_4">
+      <g>
+       <use xlink:href="#m2c99327d48" x="229.825281" y="201.258753" style="stroke: #000000; stroke-width: 0.85"/>
+      </g>
+     </g>
+     <g id="text_5">
+      <text style="font-weight: 700; font-size: 11.5px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: end" x="222.825281" y="205.444574" transform="rotate(-0 222.825281 205.444574)">No Net-Zero Strategy (72.2%)</text>
+     </g>
+    </g>
+    <g id="text_6">
+     <text style="font-weight: 700; font-size: 12.8px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle" x="16.518" y="251.136" transform="rotate(-90 16.518 251.136)">Reported Net-Zero Strategy by 2030 (Q14: No vs. Yes)</text>
+    </g>
+   </g>
+   <g id="patch_3">
+    <path d="M 243.775281 384.058922 
+L 686.365748 384.058922 
+Q 691.945748 384.058922 691.945748 380.30606 
+L 691.945748 16.582154 
+Q 691.945748 12.829292 686.365748 12.829292 
+L 243.775281 12.829292 
+Q 238.195281 12.829292 238.195281 16.582154 
+L 238.195281 380.30606 
+Q 238.195281 384.058922 243.775281 384.058922 
+z
+" clip-path="url(#pfcdc0464cb)" style="fill: #cbd5e1; opacity: 0.93; stroke: #ffffff; stroke-width: 2; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 243.775281 489.442708 
+L 686.365748 489.442708 
+Q 691.945748 489.442708 691.945748 485.689846 
+L 691.945748 391.564645 
+Q 691.945748 387.811783 686.365748 387.811783 
+L 243.775281 387.811783 
+Q 238.195281 387.811783 238.195281 391.564645 
+L 238.195281 485.689846 
+Q 238.195281 489.442708 243.775281 489.442708 
+z
+" clip-path="url(#pfcdc0464cb)" style="fill: #1b7a6e; opacity: 0.93; stroke: #ffffff; stroke-width: 2; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 703.105748 297.649213 
+L 941.275281 297.649213 
+Q 946.855281 297.649213 946.855281 293.896351 
+L 946.855281 16.582154 
+Q 946.855281 12.829292 941.275281 12.829292 
+L 703.105748 12.829292 
+Q 697.525748 12.829292 697.525748 16.582154 
+L 697.525748 293.896351 
+Q 697.525748 297.649213 703.105748 297.649213 
+z
+" clip-path="url(#pfcdc0464cb)" style="fill: #e06358; opacity: 0.93; stroke: #ffffff; stroke-width: 2; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 703.105748 489.442708 
+L 941.275281 489.442708 
+Q 946.855281 489.442708 946.855281 485.689846 
+L 946.855281 305.154936 
+Q 946.855281 301.402075 941.275281 301.402075 
+L 703.105748 301.402075 
+Q 697.525748 301.402075 697.525748 305.154936 
+L 697.525748 485.689846 
+Q 697.525748 489.442708 703.105748 489.442708 
+z
+" clip-path="url(#pfcdc0464cb)" style="fill: #1f2e4d; opacity: 0.93; stroke: #ffffff; stroke-width: 2; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 229.825281 495.072 
+L 229.825281 7.2 
+" style="fill: none; stroke: #334155; stroke-width: 0.85; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 229.825281 495.072 
+L 955.225281 495.072 
+" style="fill: none; stroke: #334155; stroke-width: 0.85; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="text_7">
+    <text style="font-weight: 700; font-size: 11.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #1e293b" transform="translate(376.926827 169.357303)">Neither / Disengaged (Index = 0)</text>
+    <text style="font-weight: 700; font-size: 11.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #1e293b" transform="translate(372.39739 181.932065)">n = 6,213 SMEs (50.9% of sample)</text>
+   </g>
+   <g id="text_8">
+    <text style="font-size: 10.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #1e293b" transform="translate(381.992187 215.615305)">Mean Substantive RE Actions: 3.37</text>
+    <text style="font-size: 10.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #1e293b" transform="translate(380.22828 226.981818)">Public Financial Support Rate: 8.3%</text>
+    <text style="font-size: 10.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #1e293b" transform="translate(380.229109 238.231068)">Mean National Digital Intensity: 20.9</text>
+   </g>
+   <g id="text_9">
+    <text style="font-weight: 700; font-size: 11.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #ffffff" transform="translate(369.518234 409.540441)">Net-Zero Strategy Only (Index = -1)</text>
+    <text style="font-weight: 700; font-size: 11.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #ffffff" transform="translate(372.39739 422.115204)">n = 1,678 SMEs (13.8% of sample)</text>
+   </g>
+   <g id="text_10">
+    <text style="font-size: 10.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #ffffff" transform="translate(381.992187 455.798444)">Mean Substantive RE Actions: 4.04</text>
+    <text style="font-size: 10.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #ffffff" transform="translate(377.280984 467.164956)">Public Financial Support Rate: 12.5%</text>
+    <text style="font-size: 10.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #ffffff" transform="translate(380.229109 478.414206)">Mean National Digital Intensity: 23.2</text>
+   </g>
+   <g id="text_11">
+    <text style="font-weight: 700; font-size: 11.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #ffffff" transform="translate(729.693202 126.152448)">Green Offerings Only (Index = +1)</text>
+    <text style="font-weight: 700; font-size: 11.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #ffffff" transform="translate(729.51739 138.727211)">n = 2,602 SMEs (21.3% of sample)</text>
+   </g>
+   <g id="text_12">
+    <text style="font-size: 10.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #ffffff" transform="translate(739.112187 172.410451)">Mean Substantive RE Actions: 4.27</text>
+    <text style="font-size: 10.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #ffffff" transform="translate(734.791859 183.776963)">Public Financial Support Rate: 11.3%</text>
+    <text style="font-size: 10.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #ffffff" transform="translate(737.349109 195.026213)">Mean National Digital Intensity: 22.8</text>
+   </g>
+   <g id="text_13">
+    <text style="font-weight: 700; font-size: 11.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #ffffff" transform="translate(734.277921 366.335587)">Dual Adopters / Both (Index = 0)</text>
+    <text style="font-weight: 700; font-size: 11.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #ffffff" transform="translate(729.51739 378.910349)">n = 1,712 SMEs (14.0% of sample)</text>
+   </g>
+   <g id="text_14">
+    <text style="font-size: 10.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #ffffff" transform="translate(739.112187 412.593589)">Mean Substantive RE Actions: 4.87</text>
+    <text style="font-size: 10.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #ffffff" transform="translate(734.400984 423.960102)">Public Financial Support Rate: 13.8%</text>
+    <text style="font-size: 10.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #ffffff" transform="translate(737.349109 435.209352)">Mean National Digital Intensity: 25.8</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="pfcdc0464cb">
+   <rect x="229.825281" y="7.2" width="725.4" height="487.872"/>
+  </clipPath>
+ </defs>
+</svg>

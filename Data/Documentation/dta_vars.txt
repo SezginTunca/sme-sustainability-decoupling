@@ -1,0 +1,99 @@
+q1_1: Q1.1 What actions is your company undertaking to be more resource efficient?
+q1_2: Q1.2 What actions is your company undertaking to be more resource efficient?
+q1_3: Q1.3 What actions is your company undertaking to be more resource efficient?
+q1_4: Q1.4 What actions is your company undertaking to be more resource efficient?
+q1_5: Q1.5 What actions is your company undertaking to be more resource efficient?
+q1_6: Q1.6 What actions is your company undertaking to be more resource efficient?
+q1_7: Q1.7 What actions is your company undertaking to be more resource efficient?
+q1_8: Q1.8 What actions is your company undertaking to be more resource efficient?
+q1_9: Q1.9 What actions is your company undertaking to be more resource efficient?
+q1_10: Q1.10 What actions is your company undertaking to be more resource efficient?
+q1_11: Q1.11 What actions is your company undertaking to be more resource efficient?
+q1_12: Q1.12 What actions is your company undertaking to be more resource efficient?
+q1t: Q1 - regrouped
+q2_1: Q2.1 Over the next two years, what are the additional resource efficiency action
+q2_2: Q2.2 Over the next two years, what are the additional resource efficiency action
+q2_3: Q2.3 Over the next two years, what are the additional resource efficiency action
+q2_4: Q2.4 Over the next two years, what are the additional resource efficiency action
+q2_5: Q2.5 Over the next two years, what are the additional resource efficiency action
+q2_6: Q2.6 Over the next two years, what are the additional resource efficiency action
+q2_7: Q2.7 Over the next two years, what are the additional resource efficiency action
+q2_8: Q2.8 Over the next two years, what are the additional resource efficiency action
+q2_9: Q2.9 Over the next two years, what are the additional resource efficiency action
+q2_10: Q2.10 Over the next two years, what are the additional resource efficiency actio
+q2_11: Q2.11 Over the next two years, what are the additional resource efficiency actio
+q2_12: Q2.12 Over the next two years, what are the additional resource efficiency actio
+q2t: Q2 - regrouped
+q3: Q3 What impact have the undertaken resource efficiency actions had on the produc
+q4: Q4 Over the past two years, how much have you invested on average per year to be
+q5_1: Q5.1 Which type of support does your company rely on in its efforts to be more r
+q5_2: Q5.2 Which type of support does your company rely on in its efforts to be more r
+q5_3: Q5.3 Which type of support does your company rely on in its efforts to be more r
+q5_4: Q5.4 Which type of support does your company rely on in its efforts to be more r
+q5_5: Q5.5 Which type of support does your company rely on in its efforts to be more r
+q6_1: Q6.1 More precisely, which type of external support is it?
+q6_2: Q6.2 More precisely, which type of external support is it?
+q6_3: Q6.3 More precisely, which type of external support is it?
+q6_4: Q6.4 More precisely, which type of external support is it?
+q6_5: Q6.5 More precisely, which type of external support is it?
+q6_6: Q6.6 More precisely, which type of external support is it?
+q6_7: Q6.7 More precisely, which type of external support is it?
+q6_8: Q6.8 More precisely, which type of external support is it?
+q6_9: Q6.9 More precisely, which type of external support is it?
+q6t1: Q6 - regrouped (public)
+q6t2: Q6 - regrouped (private)
+q7_1: Q7.1 Did your company encounter any of the following difficulties when trying to
+q7_2: Q7.2 Did your company encounter any of the following difficulties when trying to
+q7_3: Q7.3 Did your company encounter any of the following difficulties when trying to
+q7_4: Q7.4 Did your company encounter any of the following difficulties when trying to
+q7_5: Q7.5 Did your company encounter any of the following difficulties when trying to
+q7_6: Q7.6 Did your company encounter any of the following difficulties when trying to
+q7_7: Q7.7 Did your company encounter any of the following difficulties when trying to
+q7_8: Q7.8 Did your company encounter any of the following difficulties when trying to
+q7_9: Q7.9 Did your company encounter any of the following difficulties when trying to
+q7_10: Q7.10 Did your company encounter any of the following difficulties when trying t
+q7_11: Q7.11 Did your company encounter any of the following difficulties when trying t
+q7_12: Q7.12 Did your company encounter any of the following difficulties when trying t
+q8_1: Q8.1 Which of the following would help your company the most to be more resource
+q8_2: Q8.2 Which of the following would help your company the most to be more resource
+q8_3: Q8.3 Which of the following would help your company the most to be more resource
+q8_4: Q8.4 Which of the following would help your company the most to be more resource
+q8_5: Q8.5 Which of the following would help your company the most to be more resource
+q8_6: Q8.6 Which of the following would help your company the most to be more resource
+q8_7: Q8.7 Which of the following would help your company the most to be more resource
+q8_8: Q8.8 Which of the following would help your company the most to be more resource
+q8_9: Q8.9 Which of the following would help your company the most to be more resource
+q8_10: Q8.10 Which of the following would help your company the most to be more resourc
+q8_11: Q8.11 Which of the following would help your company the most to be more resourc
+q14: Q14 Does your company have a concrete strategy in place to reduce your carbon fo
+q15_1: Q15.1 What actions is your company undertaking to be become climate neutral?
+q15_2: Q15.2 What actions is your company undertaking to be become climate neutral?
+q15_3: Q15.3 What actions is your company undertaking to be become climate neutral?
+q15_4: Q15.4 What actions is your company undertaking to be become climate neutral?
+q15_5: Q15.5 What actions is your company undertaking to be become climate neutral?
+q15_6: Q15.6 What actions is your company undertaking to be become climate neutral?
+q15_7: Q15.7 What actions is your company undertaking to be become climate neutral?
+q9: Q9 Does your company offer green products or services?
+q10: Q10 How much did these green products or services represent in your annual turno
+q11: Q11 For how long has your company been selling green products or services?
+q12_1: Q12.1 In terms of turnover over the past 2 years, what were the main markets (co
+q12_2: Q12.2 In terms of turnover over the past 2 years, what were the main markets (co
+q12_3: Q12.3 In terms of turnover over the past 2 years, what were the main markets (co
+q12_4: Q12.4 In terms of turnover over the past 2 years, what were the main markets (co
+q12_5: Q12.5 In terms of turnover over the past 2 years, what were the main markets (co
+q12_6: Q12.6 In terms of turnover over the past 2 years, what were the main markets (co
+q12_7: Q12.7 In terms of turnover over the past 2 years, what were the main markets (co
+q12_8: Q12.8 In terms of turnover over the past 2 years, what were the main markets (co
+q12_9: Q12.9 In terms of turnover over the past 2 years, what were the main markets (co
+q12_10: Q12.10 In terms of turnover over the past 2 years, what were the main markets (c
+q12_11: Q12.11 In terms of turnover over the past 2 years, what were the main markets (c
+q12_12: Q12.12 In terms of turnover over the past 2 years, what were the main markets (c
+q12_13: Q12.13 In terms of turnover over the past 2 years, what were the main markets (c
+q12_14: Q12.14 In terms of turnover over the past 2 years, what were the main markets (c
+q12_15: Q12.15 In terms of turnover over the past 2 years, what were the main markets (c
+q12_16: Q12.16 In terms of turnover over the past 2 years, what were the main markets (c
+q13_1: Q13.1 What type of support does your company rely on for the production of its g
+q13_2: Q13.2 What type of support does your company rely on for the production of its g
+q13_3: Q13.3 What type of support does your company rely on for the production of its g
+q13_4: Q13.4 What type of support does your company rely on for the production of its g
+q13_5: Q13.5 What type of support does your company rely on for the production of its g

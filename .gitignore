@@ -9,25 +9,9 @@ __pycache__/
 .vscode/
 .idea/
 
-# EXCLUDE ALL DATASETS & DATA FILES (allow static markdown codebook mapping)
-Data/*
-!Data/Documentation/
-Data/Documentation/*
-!Data/Documentation/SME_Codebook_Hypothesis_Mapping.md
-*.sav
-*.dta
-*.tsv
-*.csv
-*.xlsx
-*.xls
-*.parquet
+# Compressed archives
 *.zip
 *.tar.gz
-*.shp
-*.shx
-*.dbf
-*.cpg
-*.prj
 
 # Confidential / Internal Author Tools
 Scripts/confidential/
