@@ -1,4 +1,4 @@
-# Replication Package: Green Offerings and Net-Zero Plans in European SMEs
+# Replication Package: Green Offerings and Net-Zero Plans: Markets, Capabilities and Finance in European SMEs
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23619994.svg)](https://doi.org/10.5281/zenodo.23619994)
 [![GitHub Repository](https://img.shields.io/badge/GitHub-SezginTunca%2Fsme--sustainability--decoupling-blue?logo=github)](https://github.com/SezginTunca/sme-sustainability-decoupling)
@@ -6,7 +6,8 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
 **"Green Offerings and Net-Zero Plans: Markets, Capabilities and Finance in European SMEs"**  
-**Target Journal:** *Business Strategy and the Environment* (Wiley)  
+**Target Journal:** *Business Strategy and the Environment* (Wiley) | **Manuscript ID:** `BSE-26-6866`  
+**Status:** Revision prepared for resubmission.  
 **Authors:** Sezgin Tunca, Mausam Budhathoki, and Hari Gopal Risal  
 **Canonical Zenodo Concept DOI:** [10.5281/zenodo.23619994](https://doi.org/10.5281/zenodo.23619994)  
 

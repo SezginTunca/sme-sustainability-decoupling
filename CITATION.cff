@@ -1,8 +1,8 @@
 cff-version: 1.2.0
-message: "If you use this software, please cite it as below."
+message: "If you use this software, please cite it as below. Status: Revision prepared for resubmission to Business Strategy and the Environment (BSE-26-6866)."
 title: "Replication Codebase: Green Offerings and Net-Zero Plans: Markets, Capabilities and Finance in European SMEs"
 version: 2.2.0
-date-released: 2026-11-03
+date-released: 2026-11-18
 license: MIT
 authors:
   - family-names: Tunca
@@ -15,3 +15,4 @@ authors:
     orcid: "https://orcid.org/0000-0001-6824-3912"
 repository-code: "https://github.com/SezginTunca/sme-sustainability-decoupling"
 doi: 10.5281/zenodo.23619994
+abstract: "Replication codebase for 'Green Offerings and Net-Zero Plans: Markets, Capabilities and Finance in European SMEs' (Target Journal: Business Strategy and the Environment; Manuscript ID: BSE-26-6866; Status: Revision prepared for resubmission)."
