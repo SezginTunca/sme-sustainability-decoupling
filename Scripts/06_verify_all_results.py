@@ -115,8 +115,8 @@ def main():
         "PSM_Sensitivity_Specs", "Rosenbaum_Bounds", "DI_Moderation_OLS", "DI_Country_Level",
         "GreenPremium_CrossTab", "GreenPremium_OrderedProbit", "Robustness_All",
         "Robustness_CrossEq_Diffs", "Robustness_Diagnostics", "AppendixJ_ProbScale_Moderation",
-        "Moderation_Clustered", "Construct_Validity_Table1", "Point9_Construct_Validity",
-        "Ext1_Tightened_BiProbit", "Ext2_Q8_Desired_Support"
+        "Moderation_Clustered", "AppendixJ_Q5Q6_DK_Audit", "Construct_Validity_Table1",
+        "Point9_Construct_Validity", "Ext1_Tightened_BiProbit", "Ext2_Q8_Desired_Support"
     }
     assert_check(required_res_sheets.issubset(set(res_xl.sheet_names)),
                  f"Results_Consolidated.xlsx contains all core sheets (found {len(res_xl.sheet_names)} sheets)")
@@ -352,8 +352,9 @@ def main():
                  "IPW Delta-CATE (Admin=1 vs 0) = +0.0732 (SE = 0.0319, p = 0.0220)")
     assert_check(close(cf_ate["Delta_CATE_Expertise"], 0.0223, 0.001) and cf_ate["p_Delta_CATE_Expertise"] > 0.50,
                  "IPW Delta-CATE (Expertise=1 vs 0) = +0.0223 (p = 0.516, null)")
-    assert_check(len(cf_cates) == 9 and len(ipw_diag) >= 4,
-                 "IPW CATEs (9 subgroups) and IPW_Diagnostics populated")
+    assert_check(len(cf_cates) == 9 and len(ipw_diag) >= 4
+                 and "Prespecified_or_Exploratory" in cf_cates.columns,
+                 "IPW CATEs (9 subgroups w/ Prespecified/Exploratory tags) and IPW_Diagnostics populated")
     ipw_ps_csv = os.path.join(DATA_DIR, "Processed", "IPW_Propensity_Scores.csv")
     assert_check(os.path.exists(ipw_ps_csv) and len(pd.read_csv(ipw_ps_csv)) == 11521,
                  "IPW_Propensity_Scores.csv saved in Data/Processed/ with exact N = 11,521")
@@ -474,6 +475,20 @@ def main():
     assert_check(close(rc_row("12.", "grant_receipt")["beta_y2"], 0.121, 0.002),
                  "Table 6 Spec 12 (Mean-Imputed Turnover + DK Dummy): Support b2 = +0.121 (p = 0.009)")
 
+    q56 = pd.read_excel(RES_XLSX, sheet_name="AppendixJ_Q5Q6_DK_Audit")
+    q56_r = q56[(q56["Audit_Section"] == "Routing_Counts") & (q56["Model_or_Cohort"] == "Routed_12091")].iloc[0]
+    q56_bp = q56[(q56["Model_or_Cohort"] == "Joint_BiProbit_Excl_Q5_Q6_DK") & (q56["Var"] == "grant_receipt")].iloc[0]
+    q56_ipw = q56[q56["Model_or_Cohort"] == "Stabilized_IPW_Excl_Q5_Q6_DK"].iloc[0]
+    q56_h3c = q56[(q56["Model_or_Cohort"] == "H3c_Logit_Excl_Q5_Q6_DK") & (q56["Var"] == "Delta-AME (Admin=1 vs 0)")].iloc[0]
+    q56_c = q56[(q56["Model_or_Cohort"] == "Joint_BiProbit_Q5_3_Clean_Excl_Q6_9_DK") & (q56["Var"] == "grant_receipt")].iloc[0]
+    assert_check(int(q56_r["Q6_1_Eq1_PublicFinance"]) == 1352 and int(q56_r["Q5_3_Eq1_Q6_1_Eq0_All"]) == 1848,
+                 "Appendix J Q5/Q6 routing audit: N=12,091 Q5.3=1 splits cleanly into 1,352 (Q6.1=1) + 1,848 (Q6.1=0)")
+    assert_check(int(q56_bp["N"]) == 10612 and close(q56_bp["Est_or_Beta2"], 0.121, 0.002)
+                 and int(q56_ipw["N"]) == 10979 and close(q56_ipw["Est_or_Beta2"], 0.0438, 0.002)
+                 and int(q56_h3c["N"]) == 10612 and close(q56_h3c["Est_or_Beta2"], 0.0723, 0.002)
+                 and int(q56_c["N"]) == 2855 and close(q56_c["Est_or_Beta2"], 0.073, 0.002),
+                 "Appendix J Q5/Q6 DK-exclusion checks: N=10,612 (b2=+0.121), N=10,979 (IPW=+0.044), H3c=+0.072, Q5.3=1 clean N=2,855")
+
     # -------------------------------------------------------------------------
     # SECTION 9: Exploratory Models 4 & 5 and Appendix M (Ext1-Ext3)
     # -------------------------------------------------------------------------
@@ -566,8 +581,29 @@ def main():
     root_readme = os.path.join(ROOT, "README.md")
     scripts_readme = os.path.join(ROOT, "Scripts", "README.md")
     if os.path.exists(root_readme):
+        rm_txt = open(root_readme, encoding="utf-8").read()
         assert_check(count_bad_md_table_rows(root_readme) == 0,
                      "README.md pipe tables have exact column parity (zero unescaped pipes)")
+        assert_check("10.4232/1.13941" not in rm_txt
+                     and "10.4232/1.13934" in rm_txt
+                     and "10.5281/zenodo.23619994" in rm_txt
+                     and "published in business strategy" not in rm_txt.lower(),
+                     "README.md carries GESIS DOI 10.4232/1.13934, Concept DOI, zero legacy DOI/published claim")
+    zen_path = os.path.join(ROOT, ".zenodo.json")
+    if os.path.exists(zen_path):
+        z_txt = open(zen_path, encoding="utf-8").read()
+        assert_check("10.4232/1.13941" not in z_txt and "10.4232/1.13934" in z_txt
+                     and "Revision prepared for resubmission" in z_txt
+                     and "published in business strategy" not in z_txt.lower(),
+                     ".zenodo.json: GESIS DOI 10.4232/1.13934 & resubmission status verified (zero 10.4232/1.13941 / 'published in BSE')")
+    cff_path = os.path.join(ROOT, "CITATION.cff")
+    if os.path.exists(cff_path):
+        c_txt = open(cff_path, encoding="utf-8").read()
+        assert_check("10.4232/1.13941" not in c_txt and "10.5281/zenodo.23619994" in c_txt
+                     and "10.5281/zenodo.23621909" in c_txt
+                     and "Revision prepared for resubmission" in c_txt
+                     and "published in business strategy" not in c_txt.lower(),
+                     "CITATION.cff: Concept & v2.3.0 Zenodo DOIs & resubmission status verified (zero 'published in BSE')")
     if os.path.exists(scripts_readme):
         sr_txt = open(scripts_readme, encoding="utf-8").read()
         assert_check("Table L0" not in sr_txt and "IPW_FE_Diagnostics.xlsx" not in sr_txt and "PSM_Balance_FE.xlsx" not in sr_txt

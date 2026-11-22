@@ -49,10 +49,14 @@ BP_XLSX = os.path.join(DATA_DIR, "Processed", "BiProbit_Joint_FE.xlsx")
 INP_XLSX = os.path.join(DATA_DIR, "Input_Data_Consolidated.xlsx")
 RES_CONSOL = os.path.join(DATA_DIR, "Results_Consolidated.xlsx")
 
-# Load Joint FIML Bivariate Probit engine from 02_bivariate_probit.py
+# Load Joint FIML Bivariate Probit & IPW engines from 02 and 03
 _spec02 = importlib.util.spec_from_file_location("biprobit_mod", os.path.join(SCRIPT_DIR, "02_bivariate_probit.py"))
 bp_mod = importlib.util.module_from_spec(_spec02)
 _spec02.loader.exec_module(bp_mod)
+
+_spec03 = importlib.util.spec_from_file_location("ipw_mod", os.path.join(SCRIPT_DIR, "03_causal_forest.py"))
+cf_mod = importlib.util.module_from_spec(_spec03)
+_spec03.loader.exec_module(cf_mod)
 
 IV = bp_mod.IV
 FOCAL_6 = bp_mod.FOCAL_6
@@ -344,6 +348,193 @@ def run_ext3_wave6_replication():
     return w6_df
 
 
+def compute_h3c_moderation(sub_df):
+    """Estimate country-clustered logit barrier moderation and probability-scale Delta-AME."""
+    sub = sub_df.copy()
+    f_mod = (
+        'q14_binary ~ grant_receipt * barrier_admin + grant_receipt * barrier_expertise '
+        '+ B2B_private + B2G_public + B2C + advice_public + scr10 + re_action_count '
+        '+ C(scr14_cat) + C(country_iso2) + C(nace_b)'
+    )
+    m_mod = smf.logit(f_mod, sub).fit(
+        disp=0, maxiter=300, cov_type='cluster',
+        cov_kwds={'groups': pd.factorize(sub['country_iso2'])[0]}
+    )
+    di_mod, cov_mod, beta_mod = m_mod.model.data.design_info, m_mod.cov_params().values, m_mod.params.values
+    G_mod = sub['country_iso2'].nunique()
+
+    def pg(g, a=None, e=None):
+        d_cf = sub.copy()
+        d_cf['grant_receipt'] = g
+        if a is not None:
+            d_cf['barrier_admin'] = a
+        if e is not None:
+            d_cf['barrier_expertise'] = e
+        X_cf = np.asarray(build_design_matrices([di_mod], d_cf)[0])
+        p_cf = expit(X_cf @ beta_mod)
+        return p_cf.mean(), ((p_cf * (1.0 - p_cf))[:, None] * X_cf).mean(axis=0)
+
+    mod_rows = []
+    for dim, kw, inter_term in [
+        ('Admin', 'a', 'grant_receipt:barrier_admin'),
+        ('Expertise', 'e', 'grant_receipt:barrier_expertise')
+    ]:
+        P = {(g, b): pg(g, **{kw: b}) for g in (0, 1) for b in (0, 1)}
+        for lab, est, gr in [
+            (f'AME(support | {dim}=0)', P[1, 0][0] - P[0, 0][0], P[1, 0][1] - P[0, 0][1]),
+            (f'AME(support | {dim}=1)', P[1, 1][0] - P[0, 1][0], P[1, 1][1] - P[0, 1][1]),
+            (f'Delta-AME ({dim}=1 vs 0)',
+             (P[1, 1][0] - P[0, 1][0]) - (P[1, 0][0] - P[0, 0][0]),
+             (P[1, 1][1] - P[0, 1][1]) - (P[1, 0][1] - P[0, 0][1]))
+        ]:
+            se_m = float(np.sqrt(gr @ cov_mod @ gr))
+            z_m = float(est / se_m)
+            mod_rows.append(dict(
+                quantity=lab, est=float(est), se=se_m, z=z_m,
+                lo=float(est - 1.96 * se_m), hi=float(est + 1.96 * se_m),
+                p=float(2.0 * (1.0 - stats.norm.cdf(abs(z_m)))),
+                p_t26=float(2.0 * (1.0 - stats.t.cdf(abs(z_m), df=G_mod - 1))),
+                N=int(m_mod.nobs)
+            ))
+        b_int = float(m_mod.params[inter_term])
+        se_int = float(m_mod.bse[inter_term])
+        z_int = b_int / se_int
+        mod_rows.append(dict(
+            quantity=f'Logit interaction ({inter_term})',
+            est=b_int, se=se_int, z=z_int,
+            lo=b_int - 1.96 * se_int, hi=b_int + 1.96 * se_int,
+            p=float(2.0 * (1.0 - stats.norm.cdf(abs(z_int)))),
+            p_t26=float(2.0 * (1.0 - stats.t.cdf(abs(z_int), df=G_mod - 1))),
+            N=int(m_mod.nobs)
+        ))
+    return pd.DataFrame(mod_rows)
+
+
+def run_q5_q6_dk_audit(df, d0):
+    """
+    Appendix J Q5/Q6 Routing & DK/NA Sensitivity Audit (Reviewer 2, Comment 2.5):
+      1. Exact Q5.3 / Q5.5 / Q6.9 counts across routed (12,091), valid-Q14 (11,521), and joint (11,128) cohorts
+      2. Joint FIML BiProbit excluding Q5.5=1 & Q6.9=1 (N = 10,612)
+      3. Clean Q5.3=1 subsample excluding Q6.9=1 (N = 2,855 joint & N = 2,949 single-eq Y2 Probit)
+      4. Stabilized Hajek IPW excluding Q5.5=1 & Q6.9=1 (N = 10,979)
+      5. H3c probability-scale moderation excluding Q5.5=1 & Q6.9=1 (N = 10,612)
+    """
+    routed = df[df['barrier_admin'].notna()].copy()
+    ipw_base = df.dropna(subset=IV + CTRL + ['scr14_cat', 'country_iso2', 'nace_b', 'q14_binary']).copy()
+
+    assert int(((routed['q5.3'] == 1) & (routed['q6.1'] == 1)).sum()) == 1352
+    assert int(((routed['q5.3'] == 1) & (routed['q6.1'] == 0)).sum()) == 1848
+
+    rows = []
+    for cohort_lbl, sub in [
+        ('Routed_12091', routed),
+        ('IPW_ValidQ14_11521', ipw_base),
+        ('Primary_Joint_11128', d0),
+    ]:
+        rows.append({
+            'Audit_Section': 'Routing_Counts',
+            'Model_or_Cohort': cohort_lbl,
+            'N': int(len(sub)),
+            'Q5_3_Eq1': int((sub['q5.3'] == 1).sum()),
+            'Q6_1_Eq1_PublicFinance': int(((sub['q5.3'] == 1) & (sub['q6.1'] == 1)).sum()),
+            'Q5_3_Eq1_Q6_1_Eq0_All': int(((sub['q5.3'] == 1) & (sub['q6.1'] == 0)).sum()),
+            'Q5_3_Eq1_Q6_9_Eq0_KnownNonPublic': int(((sub['q5.3'] == 1) & (sub['q6.1'] == 0) & (sub['q6.9'] == 0)).sum()),
+            'Q6_9_Eq1_Q6_DK': int((sub['q6.9'] == 1).sum()),
+            'Q5_3_Eq0_All': int((sub['q5.3'] == 0).sum()),
+            'Q5_3_Eq0_Q5_5_Eq0_InternalOnly': int(((sub['q5.3'] == 0) & (sub['q5.5'] == 0)).sum()),
+            'Q5_5_Eq1_Q5_DK': int((sub['q5.5'] == 1).sum()),
+            'Var': 'routing_counts',
+            'Est_or_Beta1': np.nan, 'SE1': np.nan, 'p1': np.nan,
+            'Est_or_Beta2': np.nan, 'SE2': np.nan, 'p2': np.nan,
+            'Diff_or_Contrast': np.nan, 'SE_Diff': np.nan, 'p_Diff': np.nan,
+        })
+
+    # Joint BiProbit: (a) Exclude Q5.5=1 & Q6.9=1 (N=10,612); (b) Clean Q5.3=1 excl. Q6.9=1 (N=2,855)
+    for spec_lbl, sub_in in [
+        ('Joint_BiProbit_Excl_Q5_Q6_DK', d0[d0['q5_q6_dk'] == 0.0].copy()),
+        ('Joint_BiProbit_Q5_3_Clean_Excl_Q6_9_DK', d0[(d0['q5.3'] == 1.0) & (d0['q6.9'] != 1.0)].copy()),
+    ]:
+        d_s, X_s = bp_mod.build_design_matrix(sub_in)
+        fit_s = bp_mod.fit_biprobit_fiml(d_s, X_s)
+        assert fit_s['diag']['grad_inf_norm'] < 1e-7 and fit_s['diag']['hess_min_eig'] > 0
+        _, diff_r, dg_r = extract_biprobit_rows(fit_s, spec_lbl)
+        for dr in diff_r:
+            rows.append({
+                'Audit_Section': 'BiProbit_Sensitivity',
+                'Model_or_Cohort': spec_lbl,
+                'N': int(dg_r['N']),
+                'Q5_3_Eq1': np.nan, 'Q6_1_Eq1_PublicFinance': np.nan,
+                'Q5_3_Eq1_Q6_1_Eq0_All': np.nan, 'Q5_3_Eq1_Q6_9_Eq0_KnownNonPublic': np.nan,
+                'Q6_9_Eq1_Q6_DK': np.nan, 'Q5_3_Eq0_All': np.nan,
+                'Q5_3_Eq0_Q5_5_Eq0_InternalOnly': np.nan, 'Q5_5_Eq1_Q5_DK': np.nan,
+                'Var': dr['var'],
+                'Est_or_Beta1': dr['beta_y1'], 'SE1': dr['se_y1'], 'p1': dr['p_y1'],
+                'Est_or_Beta2': dr['beta_y2'], 'SE2': dr['se_y2'], 'p2': dr['p_y2'],
+                'Diff_or_Contrast': dr['diff_b1_minus_b2'], 'SE_Diff': dr['se_diff'], 'p_Diff': dr['p_diff'],
+            })
+
+    # Single-eq Y2 Probit on Q5.3=1 excl. Q6.9=1 (N=2,949)
+    dr_2949 = ipw_base[(ipw_base['q5.3'] == 1.0) & (ipw_base['q6.9'] != 1.0)].copy()
+    m_2949 = fit_single_probit_clustered(f"q14_binary ~ {BASE_FORMULA}", dr_2949)
+    rows.append({
+        'Audit_Section': 'SingleEq_Probit_Sensitivity',
+        'Model_or_Cohort': 'SingleEq_Y2_Q5_3_Clean_Excl_Q6_9_DK',
+        'N': int(m_2949['nobs']),
+        'Var': 'grant_receipt',
+        'Est_or_Beta2': float(m_2949['params']['grant_receipt']),
+        'SE2': float(m_2949['bse']['grant_receipt']),
+        'p2': float(m_2949['pvalues']['grant_receipt']),
+    })
+
+    # Stabilized Hajek IPW excluding Q5.5=1 & Q6.9=1 (N=10,979)
+    sub_ipw = ipw_base[ipw_base['q5_q6_dk'] == 0.0].copy()
+    T_i = sub_ipw['grant_receipt'].values.astype(float)
+    Y_i = sub_ipw['q14_binary'].values.astype(float)
+    cl_i = sub_ipw['country_iso2'].values
+    X_cols_i = ['B2B_private', 'B2G_public', 'B2C', 'barrier_admin', 'barrier_expertise', 'scr10', 're_action_count']
+    FE_i = pd.concat([
+        pd.get_dummies(sub_ipw['scr14_cat'].astype(int), prefix='turn', drop_first=True, dtype=float),
+        pd.get_dummies(sub_ipw['country_iso2'], prefix='c', drop_first=True, dtype=float),
+        pd.get_dummies(sub_ipw['nace_b'].astype(int), prefix='s', drop_first=True, dtype=float)
+    ], axis=1)
+    X_ps_i = np.column_stack([sub_ipw[X_cols_i].values.astype(float), FE_i.values, np.ones(len(sub_ipw))])
+    b_ps_i = cf_mod.fit_logit_nr(X_ps_i, T_i, tol=1e-13, ridge=0.0)
+    ps_i = np.clip(expit(X_ps_i @ b_ps_i), 0.02, 0.98)
+    w1_i, w0_i = T_i / ps_i, (1.0 - T_i) / (1.0 - ps_i)
+    ate_i = float(np.mean(w1_i * Y_i) / np.mean(w1_i) - np.mean(w0_i * Y_i) / np.mean(w0_i))
+    se_iid_i, se_cl_i = cf_mod.two_step_ipw_influence_function(X_ps_i, T_i, Y_i, ps_i, b_ps_i, cl_i)
+    rows.append({
+        'Audit_Section': 'IPW_Sensitivity',
+        'Model_or_Cohort': 'Stabilized_IPW_Excl_Q5_Q6_DK',
+        'N': int(len(sub_ipw)),
+        'Var': 'grant_receipt_ATE',
+        'Est_or_Beta1': ate_i,
+        'SE1': se_iid_i,
+        'p1': float(2.0 * (1.0 - stats.norm.cdf(abs(ate_i / se_iid_i)))),
+        'Est_or_Beta2': ate_i,
+        'SE2': se_cl_i,
+        'p2': float(2.0 * (1.0 - stats.norm.cdf(abs(ate_i / se_cl_i)))),
+    })
+
+    # H3c Probability-Scale Moderation excluding Q5.5=1 & Q6.9=1 (N=10,612)
+    mod_clean = compute_h3c_moderation(d0[d0['q5_q6_dk'] == 0.0].copy()).set_index('quantity')
+    for qty in ['AME(support | Admin=0)', 'AME(support | Admin=1)', 'Delta-AME (Admin=1 vs 0)',
+                'Logit interaction (grant_receipt:barrier_admin)']:
+        mr = mod_clean.loc[qty]
+        rows.append({
+            'Audit_Section': 'H3c_Moderation_Sensitivity',
+            'Model_or_Cohort': 'H3c_Logit_Excl_Q5_Q6_DK',
+            'N': int(mr['N']),
+            'Var': qty,
+            'Est_or_Beta2': float(mr['est']),
+            'SE2': float(mr['se']),
+            'p2': float(mr['p']),
+            'p_Diff': float(mr['p_t26']),
+        })
+
+    return pd.DataFrame(rows)
+
+
 def main():
     print("=" * 80)
     print("05_robustness.py: JOINT BIPROBIT ROBUSTNESS, MNLOGIT, H3c MODERATION & EXTENSIONS")
@@ -475,64 +666,16 @@ def main():
     # ==========================================================================
     # 2. PROBABILITY-SCALE MODERATION (H3c) WITH advice_public INCLUDED
     # ==========================================================================
-    sub = d0.copy()
-    f_mod = (
-        'q14_binary ~ grant_receipt * barrier_admin + grant_receipt * barrier_expertise '
-        '+ B2B_private + B2G_public + B2C + advice_public + scr10 + re_action_count '
-        '+ C(scr14_cat) + C(country_iso2) + C(nace_b)'
-    )
-    m_mod = smf.logit(f_mod, sub).fit(
-        disp=0, maxiter=300, cov_type='cluster',
-        cov_kwds={'groups': pd.factorize(sub['country_iso2'])[0]}
-    )
-    di_mod, cov_mod, beta_mod = m_mod.model.data.design_info, m_mod.cov_params().values, m_mod.params.values
-    G_mod = sub['country_iso2'].nunique()
+    mod_df = compute_h3c_moderation(d0)
 
-    def pg(g, a=None, e=None):
-        d_cf = sub.copy()
-        d_cf['grant_receipt'] = g
-        if a is not None:
-            d_cf['barrier_admin'] = a
-        if e is not None:
-            d_cf['barrier_expertise'] = e
-        X_cf = np.asarray(build_design_matrices([di_mod], d_cf)[0])
-        p_cf = expit(X_cf @ beta_mod)
-        return p_cf.mean(), ((p_cf * (1.0 - p_cf))[:, None] * X_cf).mean(axis=0)
-
-    mod_rows = []
-    for dim, kw, inter_term in [
-        ('Admin', 'a', 'grant_receipt:barrier_admin'),
-        ('Expertise', 'e', 'grant_receipt:barrier_expertise')
-    ]:
-        P = {(g, b): pg(g, **{kw: b}) for g in (0, 1) for b in (0, 1)}
-        for lab, est, gr in [
-            (f'AME(support | {dim}=0)', P[1, 0][0] - P[0, 0][0], P[1, 0][1] - P[0, 0][1]),
-            (f'AME(support | {dim}=1)', P[1, 1][0] - P[0, 1][0], P[1, 1][1] - P[0, 1][1]),
-            (f'Delta-AME ({dim}=1 vs 0)',
-             (P[1, 1][0] - P[0, 1][0]) - (P[1, 0][0] - P[0, 0][0]),
-             (P[1, 1][1] - P[0, 1][1]) - (P[1, 0][1] - P[0, 0][1]))
-        ]:
-            se_m = float(np.sqrt(gr @ cov_mod @ gr))
-            z_m = float(est / se_m)
-            mod_rows.append(dict(
-                quantity=lab, est=float(est), se=se_m, z=z_m,
-                lo=float(est - 1.96 * se_m), hi=float(est + 1.96 * se_m),
-                p=float(2.0 * (1.0 - stats.norm.cdf(abs(z_m)))),
-                p_t26=float(2.0 * (1.0 - stats.t.cdf(abs(z_m), df=G_mod - 1))),
-                N=int(m_mod.nobs)
-            ))
-        b_int = float(m_mod.params[inter_term])
-        se_int = float(m_mod.bse[inter_term])
-        z_int = b_int / se_int
-        mod_rows.append(dict(
-            quantity=f'Logit interaction ({inter_term})',
-            est=b_int, se=se_int, z=z_int,
-            lo=b_int - 1.96 * se_int, hi=b_int + 1.96 * se_int,
-            p=float(2.0 * (1.0 - stats.norm.cdf(abs(z_int)))),
-            p_t26=float(2.0 * (1.0 - stats.t.cdf(abs(z_int), df=G_mod - 1))),
-            N=int(m_mod.nobs)
-        ))
-    mod_df = pd.DataFrame(mod_rows)
+    # ==========================================================================
+    # 2b. Q5/Q6 ROUTING & DK/NA SENSITIVITY AUDIT (APPENDIX J, TABLES J1 & J4)
+    # ==========================================================================
+    print("\n[Running Appendix J Q5/Q6 Routing & DK/NA Sensitivity Audit]")
+    q5q6_audit_df = run_q5_q6_dk_audit(df, d0)
+    print(q5q6_audit_df[q5q6_audit_df['Var'].isin(['grant_receipt', 'grant_receipt_ATE', 'Delta-AME (Admin=1 vs 0)'])][
+        ['Model_or_Cohort', 'N', 'Var', 'Est_or_Beta2', 'SE2', 'p2']
+    ].round(4).to_string(index=False))
 
     # ==========================================================================
     # 3. 4-QUADRANT MULTINOMIAL LOGIT (N = 11,128)
@@ -671,6 +814,7 @@ def main():
         cv_both_df.to_excel(w, sheet_name='construct_validity', index=False)
         ext1_df.to_excel(w, sheet_name='ext1_tightened_biprobit', index=False)
         ext2_df.to_excel(w, sheet_name='ext2_q8_desired_support', index=False)
+        q5q6_audit_df.to_excel(w, sheet_name='q5q6_dk_audit', index=False)
         if ext3_df is not None:
             ext3_df.to_excel(w, sheet_name='ext3_wave6_za8869', index=False)
 
@@ -737,6 +881,7 @@ def main():
         rob_diag_df.to_excel(writer, sheet_name='Robustness_Diagnostics', index=False)
         mod_df.to_excel(writer, sheet_name='AppendixJ_ProbScale_Moderation', index=False)
         mod_df.to_excel(writer, sheet_name='Moderation_Clustered', index=False)
+        q5q6_audit_df.to_excel(writer, sheet_name='AppendixJ_Q5Q6_DK_Audit', index=False)
         cv_both_df.to_excel(writer, sheet_name='Construct_Validity_Table1', index=False)
         p9_df.to_excel(writer, sheet_name='Point9_Construct_Validity', index=False)
         ext1_df.to_excel(writer, sheet_name='Ext1_Tightened_BiProbit', index=False)

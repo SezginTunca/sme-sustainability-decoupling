@@ -1,8 +1,8 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below. Status: Revision prepared for resubmission to Business Strategy and the Environment (BSE-26-6866)."
 title: "Replication Codebase: Green Offerings and Net-Zero Plans: Markets, Capabilities and Finance in European SMEs"
-version: 2.2.0
-date-released: 2026-11-18
+version: 2.3.0
+date-released: 2026-11-22
 license: MIT
 authors:
   - family-names: Tunca
@@ -14,5 +14,12 @@ authors:
     given-names: Hari Gopal
     orcid: "https://orcid.org/0000-0001-6824-3912"
 repository-code: "https://github.com/SezginTunca/sme-sustainability-decoupling"
-doi: 10.5281/zenodo.23619994
+doi: 10.5281/zenodo.23621909
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.23619994
+    description: "Canonical Zenodo Concept DOI (resolves to latest version)"
+  - type: doi
+    value: 10.5281/zenodo.23621909
+    description: "Version 2.3.0 specific Zenodo archive DOI"
 abstract: "Replication codebase for 'Green Offerings and Net-Zero Plans: Markets, Capabilities and Finance in European SMEs' (Target Journal: Business Strategy and the Environment; Manuscript ID: BSE-26-6866; Status: Revision prepared for resubmission)."

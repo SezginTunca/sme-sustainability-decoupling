@@ -390,15 +390,15 @@ def generate_figure_4(xl):
     p_delta_admin = float(ate_row["p_Delta_CATE_Admin"])
 
     meta_labels = [
-        ("Administrative Complexity Barrier", "Administrative Complexity Reported (Q7.1 = 1)"),
-        ("Administrative Complexity Barrier", "No Administrative Complexity Reported (Q7.1 = 0)"),
-        ("Environmental Expertise Barrier", "Environmental Expertise Shortage Reported (Q7.6 = 1)"),
-        ("Environmental Expertise Barrier", "No Environmental Expertise Shortage Reported (Q7.6 = 0)"),
-        ("Enterprise Size Category", "Micro Enterprises (1-9 Employees)"),
-        ("Enterprise Size Category", "Small Enterprises (10-49 Employees)"),
-        ("Enterprise Size Category", "Medium Enterprises (50-249 Employees)"),
-        ("National Digital Infrastructure", "Low National Digital Intensity (< Median)"),
-        ("National Digital Infrastructure", "High National Digital Intensity (>= Median)"),
+        ("Administrative Complexity (Prespecified H3c)", "Administrative Complexity Reported (Q7.1 = 1)"),
+        ("Administrative Complexity (Prespecified H3c)", "No Administrative Complexity Reported (Q7.1 = 0)"),
+        ("Environmental Expertise (Exploratory)", "Environmental Expertise Shortage Reported (Q7.6 = 1)"),
+        ("Environmental Expertise (Exploratory)", "No Environmental Expertise Shortage Reported (Q7.6 = 0)"),
+        ("Enterprise Size (Exploratory)", "Micro Enterprises (1-9 Employees)"),
+        ("Enterprise Size (Exploratory)", "Small Enterprises (10-49 Employees)"),
+        ("Enterprise Size (Exploratory)", "Medium Enterprises (50-249 Employees)"),
+        ("National Digital Intensity (Exploratory)", "Low National Digital Intensity (< Median)"),
+        ("National Digital Intensity (Exploratory)", "High National Digital Intensity (>= Median)"),
     ]
     cate_df["GroupName"] = [m[0] for m in meta_labels]
     cate_df["SubgroupLabel"] = [m[1] for m in meta_labels]
@@ -408,10 +408,10 @@ def generate_figure_4(xl):
     y_positions = np.arange(n)[::-1]
 
     groups = [
-        ("Administrative Complexity Barrier", [8, 7]),
-        ("Environmental Expertise Barrier", [6, 5]),
-        ("Enterprise Size Category", [4, 3, 2]),
-        ("National Digital Infrastructure", [1, 0]),
+        ("Administrative Complexity (Prespecified H3c)", [8, 7]),
+        ("Environmental Expertise (Exploratory)", [6, 5]),
+        ("Enterprise Size (Exploratory)", [4, 3, 2]),
+        ("National Digital Intensity (Exploratory)", [1, 0]),
     ]
     group_colors = ["#F8FAFC", "#F1F5F9"]
     for i, (_, row_indices) in enumerate(groups):
@@ -457,7 +457,7 @@ def generate_figure_4(xl):
     c_admin1 = float(cate_df.iloc[0]["CATE"])
     c_admin0 = float(cate_df.iloc[1]["CATE"])
     ax.annotate(
-        f"Concentrated Support Effect Under\nAdministrative Complexity (H3c)\n"
+        f"Stronger Support Association Under\nAdministrative Complexity (H3c)\n"
         f"(+{c_admin1:.3f} vs. +{c_admin0:.3f}; Delta CATE = +{delta_admin:.3f}, {fmt_p(p_delta_admin)})",
         xy=(c_admin1, y_positions[0] - 0.08),
         xytext=(0.195, y_positions[1] + 0.12),
@@ -470,7 +470,7 @@ def generate_figure_4(xl):
     ax.set_yticks(y_positions)
     ax.set_yticklabels(formatted_labels, fontsize=11.0, fontweight="bold", color="#1E293B")
     ax.set_xlabel(
-        "Conditional Average Treatment Effect of Public Financial Support on Reported Net-Zero Strategy (95% Bootstrap CI)",
+        "Propensity-Weighted Subgroup CATE on Reported Net-Zero Strategy (95% Bootstrap CI, Unadjusted)",
         fontweight="bold", labelpad=10,
     )
     ax.set_xlim(-0.055, 0.295)
@@ -898,12 +898,12 @@ def generate_figure_s3(xl):
 
     ax.set_xticks(x)
     ax.set_xticklabels(cate_data["ExpandedLabel"], rotation=28, ha="right", fontsize=10.8, fontweight="bold", color="#1E293B")
-    ax.set_ylabel("Conditional Average Treatment Effect on\nReported Net-Zero Strategy", fontweight="bold", labelpad=10)
+    ax.set_ylabel("Propensity-Weighted CATE on\nReported Net-Zero Strategy (Unadjusted)", fontweight="bold", labelpad=10)
     ax.set_ylim(-0.04, 0.175)
     ax.yaxis.grid(True, linestyle="--", alpha=0.35, color="#CBD5E1", zorder=0)
 
     ax.annotate(
-        f"Concentrated Support Effect Among\nAdministratively Constrained SMEs\n(Delta CATE = +{delta_admin:.3f}, {fmt_p(p_delta_admin)})",
+        f"Stronger Support Association Among\nAdministratively Constrained SMEs (H3c)\n(Delta CATE = +{delta_admin:.3f}, {fmt_p(p_delta_admin)})",
         xy=(0.28, cates[0]),
         xytext=(2.05, 0.140),
         fontsize=10.4, fontweight="bold", color=CORAL, ha="center",

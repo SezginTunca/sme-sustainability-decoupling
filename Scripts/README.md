@@ -19,17 +19,12 @@ python3 Scripts/run_all_analysis.py
 python3 generate_all_figures.py
 ```
 
-To run only the automated verification checks (Step 6):
-```bash
-python3 Scripts/run_all_analysis.py --verify
-```
-
 To run only the core empirical pipeline (Steps 1 to 5):
 ```bash
 python3 Scripts/run_all_analysis.py --core-only
 ```
 
-Or run each script individually in numerical sequence:
+Or run each core empirical script individually in numerical sequence:
 
 ```bash
 python3 Scripts/01_build_analytical_sample.py
@@ -37,7 +32,6 @@ python3 Scripts/02_bivariate_probit.py
 python3 Scripts/03_causal_forest.py
 python3 Scripts/04_psm_and_remaining.py
 python3 Scripts/05_robustness.py
-python3 Scripts/06_verify_all_results.py
 ```
 
 ---
@@ -65,10 +59,14 @@ python3 Scripts/06_verify_all_results.py
 - **Manuscript Mapping:** **Tables 4-5**; Section 4.4; Section 4.6; Appendices D, E, H, I (`Tables I2-I3`), L (`Table L6`).
 
 ### 5. `05_robustness.py`
-- **Role:** Four-Quadrant Multinomial Logit discrete AMEs (`Table 3`, $N = 11,128$), 12-specification joint bivariate probit robustness matrix (`Table 6`: baseline, no `RECount`, 10-item `RECount`, `w1_sme` and `w93_sme` PML, strict 2030 planners $N = 10,624$, `Q5.3=1` support seekers $N = 2,959 / 3,055$, `SCR16` product-selling SMEs $N = 7,299$, expanded covariates $N = 9,857$, 12-section NACE `nace_a` FE, complete-case turnover $N = 9,764$, mean-imputed turnover + DK dummy, plus sector splits), cluster-robust delta-method probability-scale moderation (`H3c`: $\Delta\text{AME}_{\text{Admin}} = +0.0730, \text{SE}_{\text{cl}} = 0.0223, p = 0.0011, t_{26}\ p = 0.0030$), and **Appendix M** extensions (`Ext1` tightened constructs, `Ext2` `Q8` desired support, `Ext3` 2024 Wave 6 `ZA8869` out-of-sample replication $N = 11,246$).
-- **Outputs:** `Data/Processed/Robustness_FE.xlsx` (9 sheets) and corresponding sheets in `Data/Results_Consolidated.xlsx`.
-- **Manuscript Mapping:** **Tables 3 and 6**; Section 4.3; Section 4.4; Section 4.5; Section 4.6; Appendices B, C, J, L, M.
+- **Role:** Four-Quadrant Multinomial Logit discrete AMEs (`Table 3`, $N = 11,128$), 12-specification joint bivariate probit robustness matrix (`Table 6`: baseline, no `RECount`, 10-item `RECount`, `w1_sme` and `w93_sme` PML, strict 2030 planners $N = 10,624$, `Q5.3=1` support seekers $N = 2,959 / 3,055$, `SCR16` product-selling SMEs $N = 7,299$, expanded covariates $N = 9,857$, 12-section NACE `nace_a` FE, complete-case turnover $N = 9,764$, mean-imputed turnover + DK dummy, plus sector splits), cluster-robust delta-method probability-scale moderation (`H3c`: $\Delta\text{AME}_{\text{Admin}} = +0.0730, \text{SE}_{\text{cl}} = 0.0223, p = 0.0011, t_{26}\ p = 0.0030$), **Appendix J** Q5/Q6 routing and DK-exclusion audit (`N = 10,612 / 10,979 / 2,855 / 2,949`), and **Appendix M** extensions (`Ext1` tightened constructs, `Ext2` `Q8` desired support, `Ext3` 2024 Wave 6 `ZA8869` out-of-sample replication $N = 11,246$).
+- **Outputs:** `Data/Processed/Robustness_FE.xlsx` (10 sheets) and corresponding sheets in `Data/Results_Consolidated.xlsx` (34 sheets).
+- **Manuscript Mapping:** **Tables 3 and 6**; Section 4.3; Section 4.4; Section 4.5; Section 4.6; Appendices B, C, J (`Tables J1-J4`), L, M.
 
-### 6. `06_verify_all_results.py`
-- **Role:** Automated end-to-end econometric and replication verification suite executing programmatic assertions across processed CSVs, consolidated Excel workbooks (33 sheets), codebook documentation, and generated 600-DPI PNG and vector PDF display items.
-- **Usage:** `python3 Scripts/06_verify_all_results.py` or `python3 run_all_analysis.py --verify`.
+---
+
+## Confidential Author Utilities (`Scripts/confidential/`)
+
+Author-internal quality assurance and document compilation scripts reside in [`Scripts/confidential/`](confidential/):
+- **`Scripts/confidential/06_verify_all_results.py`**: Automated end-to-end audit suite executing **200+ programmatic assertions** across workbooks, display items, citation reciprocity (75 references), Zenodo DOI consistency (`10.5281/zenodo.23619994`), and manuscript alignment.
+- **`Scripts/confidential/compile_revision_docx_and_pdf.py`**: Document compiler generating publication-ready Word DOCX manuscripts, native XML Track Changes (`<w:ins>` / `<w:del>`), response letters, and high-resolution PDFs.

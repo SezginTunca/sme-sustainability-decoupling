@@ -15,3 +15,12 @@ __pycache__/
 
 # Confidential / Internal Author Tools
 Scripts/confidential/
+
+# GESIS Eurobarometer Microdata & Firm-Level Derived Extracts (non-redistributable per GESIS Terms of Use)
+Data/Raw/*.sav
+Data/Raw/*.dta
+Data/*.sav
+Data/*.dta
+Data/Processed/SME_Analytical_Final.csv
+Data/Processed/IPW_Propensity_Scores.csv
+Data/Input_Data_Consolidated.xlsx

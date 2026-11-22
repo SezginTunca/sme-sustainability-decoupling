@@ -238,6 +238,7 @@ def estimate_ipw_and_cates(df):
         print(f"  - {label:<24}: CATE = {cate:+.4f} (SE_reest = {se_re:.4f}, p = {p_re:.4f}) [N_T={n_t}, N_C={n_c}]")
         cate_results.append({
             'Moderator': mod_name,
+            'Prespecified_or_Exploratory': 'Prespecified (H3c)' if mod_name == 'barrier_admin' else 'Exploratory (unadjusted)',
             'Value': val,
             'Label': label,
             'CATE': cate,

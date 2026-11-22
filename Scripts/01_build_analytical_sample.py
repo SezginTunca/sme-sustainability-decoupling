@@ -101,8 +101,8 @@ VARS_TO_EXTRACT = [
     'q3', 'q4',
     # Reliance on internal vs. external support (Q5.1-Q5.5)
     'q5.1', 'q5.2', 'q5.3', 'q5.4', 'q5.5',
-    # Specific external support types (Q6.1-Q6.7; routed to Q5.3 == 1)
-    'q6.1', 'q6.2', 'q6.3', 'q6.4', 'q6.5', 'q6.6', 'q6.7',
+    # Specific external support types (Q6.1-Q6.7 + Q6.8 Other + Q6.9 DK/NA; routed to Q5.3 == 1)
+    'q6.1', 'q6.2', 'q6.3', 'q6.4', 'q6.5', 'q6.6', 'q6.7', 'q6.8', 'q6.9',
     # Resource-efficiency barriers (Q7.1-Q7.12; routed to >=1 action in Q1.1-Q1.9)
     'q7.1', 'q7.2', 'q7.3', 'q7.4', 'q7.5', 'q7.6',
     'q7.7', 'q7.8', 'q7.9', 'q7.10', 'q7.11', 'q7.12',
@@ -273,7 +273,19 @@ def recode_variables(df, meta):
     df['B2B_private'] = df['scr15.2']
     df['B2G_public'] = df['scr15.3']
 
-    # 6. External Support Channels (Q6; unrouted Q5.3=0 firms did not receive external support -> 0)
+    # 6. External Support Channels (Q6; verify exact Q5.3==1 gate and Q5.5 / Q6.9 DK/NA)
+    assert int((df['q6.1'].notna() != (df['q5.3'] == 1.0)).sum()) == 0, "Q6 routing mismatch with Q5.3 == 1!"
+    df['q5_q6_dk'] = np.where(
+        df['q5.3'].isna(), np.nan,
+        ((df['q5.5'] == 1.0) | (df['q6.9'] == 1.0)).astype(float)
+    )
+    routed_mask = df['q5.3'].notna()
+    print(
+        f"  [Q5/Q6 Routing]   Routed N = {int(routed_mask.sum()):,}: "
+        f"Q5.3=1 ({int((df['q5.3'] == 1.0).sum()):,}; Q6.1=1: {int((df['q6.1'] == 1.0).sum()):,}, Q6.9=DK: {int((df['q6.9'] == 1.0).sum()):,}) | "
+        f"Q5.3=0 ({int((df['q5.3'] == 0.0).sum()):,}; internal/other only: {int(((df['q5.3'] == 0.0) & (df['q5.5'] == 0.0)).sum()):,}, Q5.5=DK: {int((df['q5.5'] == 1.0).sum()):,})"
+    )
+
     for q6_var in ['q6.1', 'q6.2', 'q6.3', 'q6.4', 'q6.5', 'q6.6', 'q6.7']:
         df[q6_var] = df[q6_var].fillna(0.0)
 
@@ -412,6 +424,9 @@ def build_waterfall_df(df):
     n_q53_routed = int((df['q5.3'] == 1.0).sum())
     n_q53_y2 = int(((df['q5.3'] == 1.0) & df['q14_binary'].notna()).sum())
     n_q53_joint = int(((df['q5.3'] == 1.0) & df['q9_binary'].notna() & df['q14_binary'].notna()).sum())
+    n_no_q56_dk_joint = int((joint_mask & (df['q5_q6_dk'] == 0.0)).sum())
+    n_q53_clean_y2 = int(((df['q5.3'] == 1.0) & (df['q6.9'] != 1.0) & df['q14_binary'].notna()).sum())
+    n_q53_clean_joint = int(((df['q5.3'] == 1.0) & (df['q6.9'] != 1.0) & df['q9_binary'].notna() & df['q14_binary'].notna()).sum())
     n_cost_10011 = int((joint_mask & df['q3'].isin([1, 2, 3, 4, 5])).sum())
     n_cost_9058 = int((joint_mask & df['q3'].isin([1, 2, 3, 4, 5]) & df['q4'].isin([1, 2, 3, 4, 5, 6])).sum())
     n_tight_keep4 = int((df['barrier_admin'].notna() & df['y1_tight_q10_gt10'].notna() & df['y2_tight_q15_tech'].notna()).sum())
@@ -444,6 +459,10 @@ def build_waterfall_df(df):
          'Filter_Rule': f'Subsample of {n_q53_routed:,} Q5.3=1 external-support users with valid Q14 (1,292 treated, 1,763 control)'},
         {'Step': '7f. Sensitivity: External Support Seekers (Q5.3=1, Joint Valid Q9 & Q14)', 'Sample_N': n_q53_joint,
          'Filter_Rule': f'Subsample of {n_q53_routed:,} Q5.3=1 external-support users in N = 11,128 (1,256 treated, 1,703 control)'},
+        {'Step': '7g. Sensitivity: Excluding Q5.5 & Q6.9 DK/NA (Joint Sample)', 'Sample_N': n_no_q56_dk_joint,
+         'Filter_Rule': 'Excludes 412 Q5.5=1 (Q5 DK/NA) and 104 Q6.9=1 (Q6 DK/NA) firms from N = 11,128 (Appendix J, Table J4)'},
+        {'Step': '7h. Sensitivity: Clean Q5.3=1 Support Seekers Excl. Q6.9=1 (Valid Q14 / Joint)', 'Sample_N': n_q53_clean_joint,
+         'Filter_Rule': f'Excludes Q6.9=1 (Q6 DK/NA) from Q5.3=1 subsample (N={n_q53_clean_y2:,} valid Q14; N={n_q53_clean_joint:,} joint)'},
         {'Step': '8a. Model 5 Operating Cost Ordered Probit (Valid Q3 in {1..5})', 'Sample_N': n_cost_10011,
          'Filter_Rule': 'SMEs in N = 11,128 with non-DK response on Q3 production cost impact'},
         {'Step': '8b. Model 5 Operating Cost Ordered Probit (+ Valid Q4 in {1..6})', 'Sample_N': n_cost_9058,
@@ -494,6 +513,7 @@ def build_constructed_codebook_df():
         ('grant_receipt', 'q6.1', '1 if q6.1==1 (public grants, guarantees, or loans); 0 if q6.1==0 or Q5.3!=1', 'All EU-27 SMEs / Routed N=11,128', 'Focal Treatment / Predictor: Public Financial Support (H3a, H3b, H3c)'),
         ('public_financial_support', 'q6.1', 'Exact alias of grant_receipt', 'All EU-27 SMEs / Routed N=11,128', 'Focal Treatment / Predictor: Public Financial Support (H3a, H3b, H3c)'),
         ('advice_public', 'q6.4', '1 if q6.4==1 (public non-financial advice); 0 if q6.4==0 or Q5.3!=1', 'All EU-27 SMEs / Routed N=11,128', 'Control: Public Non-Financial Advisory Support'),
+        ('q5_q6_dk', 'q5.5, q6.9', '1 if q5.5==1 (Q5 DK/NA) or q6.9==1 (Q6 DK/NA); 0 if routed non-DK; NaN if unrouted', 'Routed SMEs Q1.1-Q1.9 >= 1 (N=12,091; 622 DK)', 'Q5/Q6 Item Non-Response Routing Audit (Appendix J, Table J4)'),
         ('scr10', 'scr10', '1=Micro (1-9 emp), 2=Small (10-49 emp), 3=Medium (50-249 emp)', 'All EU-27 SMEs (N=13,322)', 'Control & CATE Subgroup: Firm Size Tier'),
         ('scr14_cat', 'scr14', 'Categorical integer 1..10 (1..9 = euro turnover brackets; 10 = Don\'t know/No answer)', 'All EU-27 SMEs (N=13,322)', 'Baseline Control: Categorical Turnover Bracket Fixed Effects (9 indicators)'),
         ('scr14_clean', 'scr14', 'scr14 in 1..9 ordinal turnover brackets; NaN when scr14==10 (DK/NA)', 'Valid turnover SMEs (N=11,448; N=9,764 in joint)', 'Sensitivity Control: Complete-Case Ordinal Turnover (Table 6 & Table L5)'),
