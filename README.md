@@ -48,7 +48,6 @@
 │   ├── 03_causal_forest.py              # Exact NR propensity, stabilized IPW ATE & subgroup CATEs
 │   ├── 04_psm_and_remaining.py          # Optimal 1:1 bipartite PSM, Rosenbaum bounds & Models 4-5
 │   ├── 05_robustness.py                 # 4-Quadrant MNLogit, 12-spec Table 6, H3c, Q5/Q6 DK audit & Appendix M
-│   ├── 06_verify_all_results.py         # Automated workbook, econometric & figure verification suite
 │   ├── requirements.txt                 # Core Python dependencies
 │   ├── run_all_analysis.py              # Copy of master runner for Scripts/ execution
 │   ├── generate_all_figures.py          # Copy of figure generator for Scripts/ execution

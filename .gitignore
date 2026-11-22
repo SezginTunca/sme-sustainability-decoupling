@@ -15,6 +15,7 @@ __pycache__/
 
 # Confidential / Internal Author Tools
 Scripts/confidential/
+Scripts/06_verify_all_results.py
 
 # GESIS Eurobarometer Microdata & Firm-Level Derived Extracts (non-redistributable per GESIS Terms of Use)
 Data/Raw/*.sav
